@@ -31,8 +31,8 @@ const PROVIDERS = {
     id: "gemini",
     name: "Google Gemini",
     emoji: "🟢",
-    model: "gemini-1.5-flash",
-    tag: "1M tokens/día gratis",
+    model: "gemini-2.5-flash",           // ← CAMBIADO
+    tag: "Gratis + rápido (2026)",
     tagColor: "#047857",
     tagBg: "#ECFDF5",
     color: "#1A73E8",
@@ -42,7 +42,7 @@ const PROVIDERS = {
     keyPlaceholder: "AIzaSy...",
     keyHint: "Obtén tu key gratis en aistudio.google.com",
     keyUrl: "https://aistudio.google.com/app/apikey",
-    limits: ["15 req/minuto", "1M tokens/día", "Gemini 1.5 Flash"],
+    limits: ["15-30 req/min", "250k-1M tokens/día", "Gemini 2.5 Flash"],  // ← actualizado
     recommended: true,
   },
   groq: {
@@ -68,21 +68,18 @@ const PROVIDERS = {
 // ─── API CALL (abstracted) ────────────────────────────────────────────────────
 async function streamAI({ provider, apiKey, systemPrompt, messages, onChunk }) {
   if (provider === "gemini") {
-    // Convert messages to Gemini format
-    const contents = messages.map(m => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
-      }),
-    });
+  const modelName = PROVIDERS.gemini.model; // ahora sí usa la variable
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`;
+  
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },  // sigue funcionando (camelCase aceptado)
+      contents,
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+    }),
+  })
     if (!res.ok) {
       const d = await res.json();
       throw new Error(d.error?.message || `Error ${res.status}`);
@@ -403,9 +400,9 @@ function Chat({mod, provider, apiKey}) {
       let errMsg = e.message;
       if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
         errMsg = "❌ No se pudo conectar con la API. Si estás dentro de Claude.ai (Artifact), descarga el HTML y ábrelo en tu navegador local o despliégalo en Vercel/Netlify.";
-      } else if (errMsg.includes("401") || errMsg.includes("API key")) {
-        errMsg = "❌ API key inválida. Verifica que copiaste la key completa desde el portal de " + (provider === "gemini" ? "aistudio.google.com" : "console.groq.com");
-      }
+      } else if (errMsg.includes("not found for API version v1beta")) {
+  errMsg = "❌ Modelo Gemini obsoleto. Se actualizó automáticamente a Gemini 2.5 Flash. Prueba de nuevo.";
+}
       setMsgs(p=>[...p,{role:"user",content:userMsg},{role:"assistant",content:`⚠️ ${errMsg}`}]);
     }
     setLoading(false);
