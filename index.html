@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F0EFE9;min-height:100vh;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#E8E7E1;min-height:100vh;display:flex;justify-content:center;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:4px;}
@@ -19,6 +19,32 @@ textarea,input{font-family:inherit;}
 @keyframes btnIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .fadeup{animation:fadeUp .2s ease forwards;}
 .btn-action{animation:btnIn .25s ease forwards;}
+
+/* ── Desktop responsive layout ── */
+@media (min-width: 768px) {
+  #app-shell {
+    flex-direction: row !important;
+    max-width: 1200px !important;
+    box-shadow: 0 0 60px rgba(0,0,0,.06) !important;
+  }
+  #sidebar {
+    display: flex !important;
+    width: 280px !important;
+    min-width: 260px;
+    max-width: 300px;
+    flex-shrink: 0 !important;
+    border-right: 1px solid #E5E7EB;
+  }
+  #main-panel { display: flex !important; }
+  #sidebar-nav { display: none !important; }
+  #desktop-brand { display: flex !important; }
+}
+@media (max-width: 767px) {
+  #desktop-brand { display: none !important; }
+  #sidebar { display: none !important; }
+  #main-panel { flex: 1; }
+  #app-shell { background: #F0EFE9; }
+}
 </style>
 </head>
 <body>
@@ -159,18 +185,34 @@ function testKey(provider, apiKey) {
 }
 
 // ─── ACTION PARSER ────────────────────────────────────────────────────────────
-// Extrae el bloque ##ACCIONES## del texto y devuelve {text, actions[]}
+// Rock-solid action parser using indexOf (not regex)
 function parseActions(raw) {
   if (!raw) return { text:"", actions:[] };
-  const match = raw.match(/##ACCIONES##([\s\S]*?)##FIN##/i);
-  if (!match) return { text:raw, actions:[] };
-  const block = match[1];
-  const actions = block.split("\n")
-    .map(function(l) { return l.replace(/^\d+[\.\)]\s*/, "").replace(/^[-*]\s*/, "").trim(); })
-    .filter(function(l) { return l.length > 3 && l.length < 80; });
-  const text = raw.replace(/##ACCIONES##[\s\S]*?##FIN##/i, "").trim();
-  return { text:text, actions:actions };
+  var MARKERS = ["##ACCIONES##","[ACCIONES]","## ACCIONES ##","##acciones##"];
+  var ENDS    = ["##FIN##","[/ACCIONES]","##fin##"];
+  var markerIdx = -1, markerLen = 0;
+  for (var mi=0; mi<MARKERS.length; mi++) {
+    var idx = raw.indexOf(MARKERS[mi]);
+    if (idx !== -1) { markerIdx = idx; markerLen = MARKERS[mi].length; break; }
+  }
+  if (markerIdx === -1) return { text:raw, actions:[] };
+  var blockStart = markerIdx + markerLen;
+  var blockEnd = raw.length;
+  for (var ei=0; ei<ENDS.length; ei++) {
+    var ei2 = raw.indexOf(ENDS[ei], blockStart);
+    if (ei2 !== -1) { blockEnd = ei2; break; }
+  }
+  var block = raw.slice(blockStart, blockEnd);
+  var actions = block.split("\n")
+    .map(function(l) { return l.replace(/^\s*\d+[\.)\]]\s*/, "").replace(/^[-*•]\s*/, "").trim(); })
+    .filter(function(l) { return l.length > 3 && l.length < 100; })
+    .slice(0, 4);
+  var text = (raw.slice(0, markerIdx) + raw.slice(blockEnd + (blockEnd < raw.length ? ENDS[0].length : 0))).trim();
+  // Fallback: if text is empty but we had content, just strip from marker
+  if (!text) text = raw.slice(0, markerIdx).trim();
+  return { text: text || raw, actions: actions };
 }
+
 
 // Acciones por defecto por módulo (cuando el modelo no las incluye)
 function getDefaultActions(modId) {
@@ -189,15 +231,15 @@ function getDefaultActions(modId) {
 // ─── SUFFIX para todos los system prompts ────────────────────────────────────
 const ACTION_SUFFIX = `
 
-REGLA OBLIGATORIA DE FORMATO: Al final de CADA respuesta tuya, sin excepción, incluye exactamente este bloque con 3 acciones que el estudiante puede tomar ahora:
+INSTRUCCIÓN CRÍTICA — SIEMPRE al final de cada respuesta tuya, sin excepción, incluye este bloque EXACTO (copia el formato tal cual):
 
 ##ACCIONES##
-1. [acción específica relacionada con lo que explicaste, en primera persona del estudiante, máx 8 palabras]
-2. [acción para practicar o profundizar, máx 8 palabras]
-3. [acción para avanzar al siguiente paso, máx 8 palabras]
+1. [acción concreta en primera persona del estudiante, máx 8 palabras]
+2. [acción para practicar ahora mismo, máx 8 palabras]
+3. [siguiente paso lógico, máx 8 palabras]
 ##FIN##
 
-Ejemplos de acciones buenas: "Dame un ejercicio de esto", "Muéstrame el código completo", "Explícame el siguiente concepto", "Quiero intentarlo yo solo". NUNCA omitas este bloque.`;
+IMPORTANTE: el bloque debe terminar siempre con ##FIN##. Ejemplos: "Dame un ejercicio práctico", "Muéstrame el código completo", "Explícame el siguiente tema". NO omitas ##FIN## nunca.`;
 
 // ─── MODULE DATA ──────────────────────────────────────────────────────────────
 const P = {
@@ -690,12 +732,7 @@ function Chat({mod, provider, apiKey}) {
           </div>
         )}
 
-        {/* Sticky action bar at bottom when conversation active */}
-        {msgs.length > 0 && !loading && pendingActions && pendingActions.length > 0 && (
-          <div style={{position:"sticky",bottom:0,paddingTop:4}}>
-            <ActionBar actions={pendingActions} color={mod.color.t} onAction={function(a) { call(a, msgs); }} disabled={loading}/>
-          </div>
-        )}
+        {/* action bar shown after last message only */}
 
         <div ref={bottomRef}/>
       </div>
@@ -1050,6 +1087,90 @@ function Home({progMap, provider, onSelect, onSettings}) {
 }
 
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
+// ─── SIDEBAR (desktop only) ───────────────────────────────────────────────────
+function Sidebar({progMap, provider, activeModId, onSelect, onSettings}) {
+  const prov = PROVIDERS[provider];
+
+  function getP(mod) {
+    var p = progMap[mod.id] || {}; var total=0, done=0;
+    if (mod.submodules) {
+      mod.submodules.forEach(function(s) {
+        total += s.topics.length + s.projects.length;
+        var st=(p.subTopics||{})[s.id]||[]; var sp=(p.subProjs||{})[s.id]||{};
+        done += st.filter(Boolean).length + Object.values(sp).filter(Boolean).length;
+      });
+    } else {
+      total = mod.topics.length + mod.projects.length;
+      done = (p.topics||[]).filter(Boolean).length + Object.values(p.projects||{}).filter(Boolean).length;
+    }
+    return total>0 ? Math.round(done/total*100) : 0;
+  }
+  var gp = Math.round(MODULES.reduce(function(a,m){return a+getP(m);},0)/MODULES.length);
+
+  return (
+    <div id="sidebar" style={{display:"flex",flexDirection:"column",background:"white",height:"100vh",overflow:"hidden"}}>
+      {/* Sidebar header */}
+      <div style={{padding:"18px 16px 12px",borderBottom:"1px solid #F3F4F6",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <div style={{width:30,height:30,borderRadius:9,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,color:"white",flexShrink:0}}>C</div>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:"#111827",lineHeight:1.2}}>Claude Bootcamp</div>
+            <div style={{fontSize:10,color:"#9CA3AF"}}>De Básico a Experto</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{height:4,background:"#F3F4F6",borderRadius:4,overflow:"hidden"}}>
+              <div style={{height:"100%",width:gp+"%",background:"#111827",borderRadius:4,transition:"width .6s"}}/>
+            </div>
+            <div style={{fontSize:10,color:"#9CA3AF",marginTop:3}}>{gp}% completado</div>
+          </div>
+          <Ring pct={gp} size={36} sw={3} color="#111827"/>
+        </div>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,marginTop:8,padding:"3px 8px",borderRadius:20,background:prov.bg,border:"1px solid "+prov.border}}>
+          <span style={{fontSize:11}}>{prov.emoji}</span>
+          <span style={{fontSize:10,fontWeight:700,color:prov.color}}>{prov.name}</span>
+          <span style={{fontSize:10,color:"#9CA3AF"}}>· Gratis</span>
+        </div>
+      </div>
+
+      {/* Module list */}
+      <div style={{flex:1,overflowY:"auto",padding:"10px 10px"}}>
+        {MODULES.map(function(mod) {
+          var pct = getP(mod);
+          var isActive = mod.id === activeModId;
+          return (
+            <button key={mod.id} onClick={function(){onSelect(mod.id);}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 10px",
+              borderRadius:10,width:"100%",textAlign:"left",cursor:"pointer",fontFamily:"inherit",
+              border:"1.5px solid "+(isActive?mod.color.t+"60":pct>0?mod.color.b:"transparent"),
+              background:isActive?mod.color.bg+"EE":pct>0?mod.color.bg+"44":"transparent",
+              marginBottom:3,transition:"all .15s",
+            }}>
+              <div style={{width:32,height:32,borderRadius:8,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0,border:isActive?"1.5px solid "+mod.color.t+"40":"1px solid transparent"}}>{mod.emoji}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:isActive?700:500,color:isActive?mod.color.t:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mod.name}</div>
+                <div style={{fontSize:10,color:"#9CA3AF",marginTop:1}}>{mod.weeks}</div>
+              </div>
+              <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2}}>
+                <Ring pct={pct} size={28} sw={2.5} color={isActive?mod.color.t:pct>0?mod.color.t:"#D1D5DB"}/>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Settings footer */}
+      <div style={{padding:"10px",borderTop:"1px solid #F3F4F6",flexShrink:0}}>
+        <button onClick={onSettings} style={{width:"100%",padding:"9px",borderRadius:8,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:11,color:"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>
+          ⚙️ Ajustes
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ROOT ─────────────────────────────────────────────────────────────────
 function App() {
   const [cfg, setCfg] = useLS("cb_cfg_v4", null);
   const [progMap, setProgMap] = useLS("cb_prog_v4", {});
@@ -1057,53 +1178,81 @@ function App() {
   const [setupMode, setSetupMode] = useState(false);
 
   var needSetup = !cfg || !cfg.apiKey;
-  var activeMod = view.startsWith("m:") ? MODULES.find(function(m) { return m.id === view.slice(2); }) : null;
+  var activeModId = view.startsWith("m:") ? view.slice(2) : null;
+  var activeMod = activeModId ? MODULES.find(function(m){return m.id===activeModId;}) : null;
 
   function clearAll() {
-    Object.keys(localStorage).filter(function(k) {
-      return k.startsWith("cb_") || k.startsWith("chat4_");
-    }).forEach(function(k) { localStorage.removeItem(k); });
+    Object.keys(localStorage).filter(function(k){return k.startsWith("cb_")||k.startsWith("chat4_");})
+      .forEach(function(k){localStorage.removeItem(k);});
     setCfg(null); setProgMap({}); setSetupMode(true); setView("home");
   }
 
   if (needSetup || setupMode) {
-    return <Setup onSave={function(provider, apiKey) { setCfg({provider:provider, apiKey:apiKey}); setSetupMode(false); }}/>;
+    return <Setup onSave={function(provider,apiKey){setCfg({provider:provider,apiKey:apiKey});setSetupMode(false);}}/>;
   }
 
-  return (
-    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:"#F0EFE9",maxWidth:520,margin:"0 auto",boxShadow:"0 0 40px rgba(0,0,0,.08)",fontFamily:"inherit"}}>
-      {/* Nav */}
-      <div style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,.97)",backdropFilter:"blur(10px)",borderBottom:"1px solid #F3F4F6",padding:"0 14px",height:50,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-        {view !== "home" && (
-          <button onClick={function() { setView("home"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#374151",fontSize:20,padding:"0 6px 0 0",display:"flex",alignItems:"center",flexShrink:0,fontFamily:"inherit"}}>←</button>
-        )}
-        <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0}}>
-          <div style={{width:26,height:26,borderRadius:7,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"white",flexShrink:0}}>C</div>
-          <span style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {activeMod ? (activeMod.emoji + " Módulo " + activeMod.id) : view==="settings" ? "Ajustes" : "Claude Bootcamp"}
-          </span>
-        </div>
-        {view === "home" && (
-          <div style={{display:"flex",alignItems:"center",gap:4,background:PROVIDERS[cfg.provider].bg,border:"1px solid "+PROVIDERS[cfg.provider].border,borderRadius:20,padding:"3px 8px",flexShrink:0}}>
-            <span style={{fontSize:11}}>{PROVIDERS[cfg.provider].emoji}</span>
-            <span style={{fontSize:10,fontWeight:700,color:PROVIDERS[cfg.provider].color}}>{PROVIDERS[cfg.provider].name}</span>
-          </div>
-        )}
-      </div>
+  var prov = PROVIDERS[cfg.provider];
 
-      {/* Content */}
-      <div style={{flex:1,overflow:activeMod?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
-        {activeMod ? (
-          <ModDetail mod={activeMod} progress={progMap[activeMod.id]||{}}
-            onProgress={function(p) { setProgMap(function(prev) { return Object.assign({},prev,{[activeMod.id]:p}); }); }}
-            provider={cfg.provider} apiKey={cfg.apiKey}/>
-        ) : view === "settings" ? (
-          <Settings provider={cfg.provider} onChangeProvider={function() { setSetupMode(true); }} onClearAll={clearAll}/>
-        ) : (
-          <div style={{overflowY:"auto",flex:1}}>
-            <Home progMap={progMap} provider={cfg.provider} onSelect={function(id) { setView("m:"+id); }} onSettings={function() { setView("settings"); }}/>
+  return (
+    <div id="app-shell" style={{display:"flex",flexDirection:"column",height:"100vh",background:"#F0EFE9",maxWidth:520,margin:"0 auto",boxShadow:"0 0 40px rgba(0,0,0,.08)",fontFamily:"inherit"}}>
+
+      {/* ── DESKTOP: sidebar always visible ── */}
+      <Sidebar progMap={progMap} provider={cfg.provider} activeModId={activeModId}
+        onSelect={function(id){setView("m:"+id);}}
+        onSettings={function(){setView("settings");}}/>
+
+      {/* ── MAIN PANEL ── */}
+      <div id="main-panel" style={{flex:1,display:"flex",flexDirection:"column",minWidth:0,overflow:"hidden"}}>
+
+        {/* Mobile nav (hidden on desktop via CSS) */}
+        <div id="sidebar-nav" style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,.97)",backdropFilter:"blur(10px)",borderBottom:"1px solid #F3F4F6",padding:"0 14px",height:50,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          {view!=="home"&&(
+            <button onClick={function(){setView("home");}} style={{background:"none",border:"none",cursor:"pointer",color:"#374151",fontSize:20,padding:"0 6px 0 0",display:"flex",alignItems:"center",flexShrink:0,fontFamily:"inherit"}}>←</button>
+          )}
+          <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0}}>
+            <div style={{width:26,height:26,borderRadius:7,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"white",flexShrink:0}}>C</div>
+            <span style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {activeMod?(activeMod.emoji+" Módulo "+activeMod.id):view==="settings"?"Ajustes":"Claude Bootcamp"}
+            </span>
+          </div>
+          {view==="home"&&(
+            <div style={{display:"flex",alignItems:"center",gap:4,background:prov.bg,border:"1px solid "+prov.border,borderRadius:20,padding:"3px 8px",flexShrink:0}}>
+              <span style={{fontSize:11}}>{prov.emoji}</span>
+              <span style={{fontSize:10,fontWeight:700,color:prov.color}}>{prov.name}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Desktop module header (shown on desktop when a module is open) */}
+        {activeMod && (
+          <div id="desktop-brand" style={{display:"none",alignItems:"center",gap:10,padding:"12px 20px",borderBottom:"1px solid #F3F4F6",background:"white",flexShrink:0}}>
+            <div style={{width:36,height:36,borderRadius:10,background:activeMod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{activeMod.emoji}</div>
+            <div>
+              <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>MÓDULO {activeMod.id} · {activeMod.level.toUpperCase()}</div>
+              <div style={{fontSize:15,fontWeight:800,color:"#111827"}}>{activeMod.name}</div>
+            </div>
           </div>
         )}
+        {!activeMod && view==="settings" && (
+          <div id="desktop-brand" style={{display:"none",alignItems:"center",gap:10,padding:"12px 20px",borderBottom:"1px solid #F3F4F6",background:"white",flexShrink:0}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#111827"}}>⚙️ Ajustes</div>
+          </div>
+        )}
+
+        {/* Content */}
+        <div style={{flex:1,overflow:activeMod?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
+          {activeMod?(
+            <ModDetail mod={activeMod} progress={progMap[activeMod.id]||{}}
+              onProgress={function(p){setProgMap(function(prev){return Object.assign({},prev,{[activeMod.id]:p});});}}
+              provider={cfg.provider} apiKey={cfg.apiKey}/>
+          ):view==="settings"?(
+            <Settings provider={cfg.provider} onChangeProvider={function(){setSetupMode(true);}} onClearAll={clearAll}/>
+          ):(
+            <div style={{overflowY:"auto",flex:1}}>
+              <Home progMap={progMap} provider={cfg.provider} onSelect={function(id){setView("m:"+id);}} onSettings={function(){setView("settings");}}/>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1113,4 +1262,5 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
+
 
