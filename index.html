@@ -67,75 +67,128 @@ const PROVIDERS = {
 
 // ─── API CALL (abstracted) ────────────────────────────────────────────────────
 async function streamAI({ provider, apiKey, systemPrompt, messages, onChunk }) {
-  if (provider === "gemini") {
-  // ── Preparar contents de forma segura ────────────────────────────────
-  let contents = [];
-  if (Array.isArray(messages) && messages.length > 0) {
-    contents = messages.map(m => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content || "" }],
-    }));
-  }
-
-  // Si es el primer mensaje, Gemini requiere al menos un content con role "user"
-  if (contents.length === 0) {
-    contents = [{ role: "user", parts: [{ text: systemPrompt || "Inicia la conversación." }] }];
-  } else {
-    // Asegurarse de que el último sea "user" (Gemini lo exige en muchos casos)
-    const last = contents[contents.length - 1];
-    if (last.role !== "user") {
-      contents.push({ role: "user", parts: [{ text: "" }] }); // placeholder si es necesario
-    }
-  }
-
-  const modelName = PROVIDERS.gemini.model || "gemini-2.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-      contents,
-      generationConfig: {
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    let errData;
-    try { errData = await res.json(); } catch {}
-    throw new Error(errData?.error?.message || `Gemini HTTP ${res.status}`);
-  }
-
-  // ── El resto del reader / streaming queda igual ───────────────────────
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
   let full = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = dec.decode(value, { stream: true });
-    for (const line of chunk.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (!data || data === "[DONE]") continue;
-      try {
-        const j = JSON.parse(data);
-        const text = j.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          full += text;
-          onChunk(full);
+
+  if (provider === "gemini") {
+    // Preparar contents de forma segura
+    let contents = [];
+    if (Array.isArray(messages) && messages.length > 0) {
+      contents = messages.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content || "" }],
+      }));
+    }
+
+    // Caso primer mensaje: Gemini requiere al menos un content "user"
+    if (contents.length === 0) {
+      contents = [{ role: "user", parts: [{ text: "Inicia la conversación." }] }];
+    }
+
+    // Asegurar que el último mensaje sea "user" (regla común de Gemini para chat)
+    const last = contents[contents.length - 1];
+    if (last && last.role !== "user") {
+      contents.push({ role: "user", parts: [{ text: "" }] }); // placeholder vacío
+    }
+
+    const modelName = PROVIDERS.gemini.model || "gemini-2.5-flash"; // ← usa el valor de PROVIDERS
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+        contents,
+        generationConfig: {
+          maxOutputTokens: 1024,
+          temperature: 0.7,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      let errData;
+      try { errData = await res.json(); } catch {}
+      const errMsg = errData?.error?.message || `Gemini HTTP ${res.status}`;
+      throw new Error(errMsg);
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = dec.decode(value, { stream: true });
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const j = JSON.parse(data);
+          const text = j.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            full += text;
+            onChunk(full);
+          }
+        } catch (e) {
+          console.warn("JSON parse error in Gemini stream:", e);
         }
-      } catch (e) {
-        console.warn("JSON parse error in Gemini stream:", e);
       }
     }
+  } 
+  else if (provider === "groq") {
+    // ← Este bloque faltaba o estaba truncado en tu copia
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: PROVIDERS.groq.model || "llama-3.3-70b-versatile",
+        max_tokens: 1024,
+        stream: true,
+        messages: [
+          { role: "system", content: systemPrompt || "Eres un tutor útil." },
+          ...(Array.isArray(messages) ? messages : []),
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      let errData;
+      try { errData = await res.json(); } catch {}
+      throw new Error(errData?.error?.message || `Groq HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = dec.decode(value, { stream: true });
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const j = JSON.parse(data);
+          const text = j.choices?.[0]?.delta?.content;
+          if (text) {
+            full += text;
+            onChunk(full);
+          }
+        } catch (e) {
+          console.warn("JSON parse error in Groq stream:", e);
+        }
+      }
+    }
+  } 
+  else {
+    throw new Error(`Proveedor no soportado: ${provider}`);
   }
+
   return full;
-    
 }
 
 function testKey(provider, apiKey) {
