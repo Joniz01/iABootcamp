@@ -16,176 +16,134 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 textarea,input{font-family:inherit;}
 @keyframes pulse{0%,100%{opacity:.5;transform:scale(.9)}50%{opacity:1;transform:scale(1.2)}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes btnIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .fadeup{animation:fadeUp .2s ease forwards;}
+.btn-action{animation:btnIn .25s ease forwards;}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // ─── PROVIDERS ────────────────────────────────────────────────────────────────
 const PROVIDERS = {
   gemini: {
-    id: "gemini",
-    name: "Google Gemini",
-    emoji: "🟢",
-    model: "gemini-2.5-flash",           // ← CAMBIADO
-    tag: "Gratis + rápido (2026)",
-    tagColor: "#047857",
-    tagBg: "#ECFDF5",
-    color: "#1A73E8",
-    bg: "#E8F4FD",
-    border: "#BFDBFE",
-    keyPrefix: "AIza",
-    keyPlaceholder: "AIzaSy...",
-    keyHint: "Obtén tu key gratis en aistudio.google.com",
-    keyUrl: "https://aistudio.google.com/app/apikey",
-    limits: ["15-30 req/min", "250k-1M tokens/día", "Gemini 2.5 Flash"],  // ← actualizado
-    recommended: true,
+    id:"gemini", name:"Google Gemini", emoji:"🟢",
+    model:"gemini-2.0-flash",
+    tag:"Gratis + rápido",
+    color:"#1A73E8", bg:"#E8F4FD", border:"#BFDBFE",
+    keyPrefix:"AIza", keyPlaceholder:"AIzaSy...",
+    keyHint:"Obtén tu key gratis en aistudio.google.com",
+    keyUrl:"https://aistudio.google.com/app/apikey",
+    limits:["15 req/min","1M tokens/día","Gemini 2.0 Flash"],
+    recommended:true,
   },
   groq: {
-    id: "groq",
-    name: "Groq",
-    emoji: "⚡",
-    model: "llama-3.3-70b-versatile",
-    tag: "Ultrarrápido gratis",
-    tagColor: "#B45309",
-    tagBg: "#FFFBEB",
-    color: "#D97706",
-    bg: "#FFFBEB",
-    border: "#FCD34D",
-    keyPrefix: "gsk_",
-    keyPlaceholder: "gsk_...",
-    keyHint: "Obtén tu key gratis en console.groq.com",
-    keyUrl: "https://console.groq.com/keys",
-    limits: ["30 req/minuto", "~6k tokens/min", "Llama 3.3 70B"],
-    recommended: false,
+    id:"groq", name:"Groq", emoji:"⚡",
+    model:"llama-3.3-70b-versatile",
+    tag:"Ultrarrápido gratis",
+    color:"#D97706", bg:"#FFFBEB", border:"#FCD34D",
+    keyPrefix:"gsk_", keyPlaceholder:"gsk_...",
+    keyHint:"Obtén tu key gratis en console.groq.com",
+    keyUrl:"https://console.groq.com/keys",
+    limits:["30 req/min","~6k tokens/min","Llama 3.3 70B"],
+    recommended:false,
   },
 };
 
-// ─── API CALL (abstracted) ────────────────────────────────────────────────────
+// ─── API CALL ─────────────────────────────────────────────────────────────────
 async function streamAI({ provider, apiKey, systemPrompt, messages, onChunk }) {
   let full = "";
 
   if (provider === "gemini") {
-    // Preparar contents de forma segura
     let contents = [];
     if (Array.isArray(messages) && messages.length > 0) {
-      contents = messages.map(m => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content || "" }],
-      }));
+      contents = messages.map(function(m) {
+        return { role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content || "" }] };
+      });
     }
-
-    // Caso primer mensaje: Gemini requiere al menos un content "user"
     if (contents.length === 0) {
-      contents = [{ role: "user", parts: [{ text: "Inicia la conversación." }] }];
+      contents = [{ role:"user", parts:[{ text:"Inicia la conversación." }] }];
     }
-
-    // Asegurar que el último mensaje sea "user" (regla común de Gemini para chat)
     const last = contents[contents.length - 1];
     if (last && last.role !== "user") {
-      contents.push({ role: "user", parts: [{ text: "" }] }); // placeholder vacío
+      contents.push({ role:"user", parts:[{ text:"continúa" }] });
     }
 
-    const modelName = PROVIDERS.gemini.model || "gemini-2.5-flash"; // ← usa el valor de PROVIDERS
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/" + PROVIDERS.gemini.model + ":streamGenerateContent?alt=sse&key=" + apiKey;
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({
-        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-        contents,
-        generationConfig: {
-          maxOutputTokens: 1024,
-          temperature: 0.7,
-        },
+        systemInstruction: systemPrompt ? { parts:[{ text:systemPrompt }] } : undefined,
+        contents: contents,
+        generationConfig:{ maxOutputTokens:1200, temperature:0.7 },
       }),
     });
-
     if (!res.ok) {
-      let errData;
-      try { errData = await res.json(); } catch {}
-      const errMsg = errData?.error?.message || `Gemini HTTP ${res.status}`;
-      throw new Error(errMsg);
+      let errData = null;
+      try { errData = await res.json(); } catch(e2) {}
+      throw new Error((errData && errData.error && errData.error.message) || ("Gemini HTTP " + res.status));
     }
-
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const text = dec.decode(chunk.value, { stream:true });
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6).trim();
         if (!data || data === "[DONE]") continue;
         try {
           const j = JSON.parse(data);
-          const text = j.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            full += text;
-            onChunk(full);
-          }
-        } catch (e) {
-          console.warn("JSON parse error in Gemini stream:", e);
-        }
+          const t = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts && j.candidates[0].content.parts[0] && j.candidates[0].content.parts[0].text;
+          if (t) { full += t; onChunk(full); }
+        } catch(e3) {}
       }
     }
-  } 
-  else if (provider === "groq") {
-    // ← Este bloque faltaba o estaba truncado en tu copia
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: PROVIDERS.groq.model || "llama-3.3-70b-versatile",
-        max_tokens: 1024,
-        stream: true,
-        messages: [
-          { role: "system", content: systemPrompt || "Eres un tutor útil." },
-          ...(Array.isArray(messages) ? messages : []),
-        ],
-      }),
-    });
 
-    if (!res.ok) {
-      let errData;
-      try { errData = await res.json(); } catch {}
-      throw new Error(errData?.error?.message || `Groq HTTP ${res.status}`);
+  } else if (provider === "groq") {
+    const msgs = [{ role:"system", content: systemPrompt || "Eres un tutor útil." }];
+    if (Array.isArray(messages)) {
+      for (let i = 0; i < messages.length; i++) {
+        msgs.push({ role:messages[i].role, content:messages[i].content });
+      }
     }
-
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer " + apiKey },
+      body: JSON.stringify({ model: PROVIDERS.groq.model, max_tokens:1200, stream:true, messages:msgs }),
+    });
+    if (!res.ok) {
+      let errData = null;
+      try { errData = await res.json(); } catch(e2) {}
+      throw new Error((errData && errData.error && errData.error.message) || ("Groq HTTP " + res.status));
+    }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const text = dec.decode(chunk.value, { stream:true });
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6).trim();
         if (data === "[DONE]") break;
         try {
           const j = JSON.parse(data);
-          const text = j.choices?.[0]?.delta?.content;
-          if (text) {
-            full += text;
-            onChunk(full);
-          }
-        } catch (e) {
-          console.warn("JSON parse error in Groq stream:", e);
-        }
+          const t = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
+          if (t) { full += t; onChunk(full); }
+        } catch(e3) {}
       }
     }
-  } 
-  else {
-    throw new Error(`Proveedor no soportado: ${provider}`);
+  } else {
+    throw new Error("Proveedor no soportado: " + provider);
   }
 
   return full;
@@ -195,11 +153,51 @@ function testKey(provider, apiKey) {
   const p = PROVIDERS[provider];
   const key = apiKey.trim();
   if (!key) throw new Error("Ingresa tu API key");
-  if (!key.startsWith(p.keyPrefix)) throw new Error(`La key de ${p.name} debe empezar con "${p.keyPrefix}"`);
+  if (!key.startsWith(p.keyPrefix)) throw new Error("La key de " + p.name + " debe empezar con \"" + p.keyPrefix + "\"");
   if (provider === "gemini" && key.length < 20) throw new Error("La key de Gemini parece demasiado corta");
   if (provider === "groq" && key.length < 30) throw new Error("La key de Groq parece demasiado corta");
-  // Format OK — real validation happens on first message
 }
+
+// ─── ACTION PARSER ────────────────────────────────────────────────────────────
+// Extrae el bloque ##ACCIONES## del texto y devuelve {text, actions[]}
+function parseActions(raw) {
+  if (!raw) return { text:"", actions:[] };
+  const match = raw.match(/##ACCIONES##([\s\S]*?)##FIN##/i);
+  if (!match) return { text:raw, actions:[] };
+  const block = match[1];
+  const actions = block.split("\n")
+    .map(function(l) { return l.replace(/^\d+[\.\)]\s*/, "").replace(/^[-*]\s*/, "").trim(); })
+    .filter(function(l) { return l.length > 3 && l.length < 80; });
+  const text = raw.replace(/##ACCIONES##[\s\S]*?##FIN##/i, "").trim();
+  return { text:text, actions:actions };
+}
+
+// Acciones por defecto por módulo (cuando el modelo no las incluye)
+function getDefaultActions(modId) {
+  const map = {
+    "00":["Explícame qué es un token con ejemplo","Dame un ejercicio práctico ahora","¿Cómo funciona el context window?"],
+    "01":["Enséñame Chain of Thought paso a paso","Analiza este prompt y mejóralo","Dame un ejercicio de few-shot"],
+    "02":["Crea un Artifact React básico","Explícame useState con ejemplo","¿Cuándo uso HTML vs React?"],
+    "03":["Muéstrame un SKILL.md completo","¿Qué es MCP exactamente?","Ayúdame a crear mi primer skill"],
+    "04":["Empiezo con Python desde cero","Empiezo con JavaScript","¿Cómo llamo a la API de Anthropic?"],
+    "05":["Diseña la arquitectura de mi app","Revisa mi código como tech lead","¿Cómo hago deploy en producción?"],
+    "06":["Explícame RAG con un ejemplo real","¿Qué es Claude Code?","Construye un agente multi-step conmigo"],
+  };
+  return map[modId] || ["Continuar al siguiente tema","Dame un ejercicio práctico","Explícame más a fondo"];
+}
+
+// ─── SUFFIX para todos los system prompts ────────────────────────────────────
+const ACTION_SUFFIX = `
+
+REGLA OBLIGATORIA DE FORMATO: Al final de CADA respuesta tuya, sin excepción, incluye exactamente este bloque con 3 acciones que el estudiante puede tomar ahora:
+
+##ACCIONES##
+1. [acción específica relacionada con lo que explicaste, en primera persona del estudiante, máx 8 palabras]
+2. [acción para practicar o profundizar, máx 8 palabras]
+3. [acción para avanzar al siguiente paso, máx 8 palabras]
+##FIN##
+
+Ejemplos de acciones buenas: "Dame un ejercicio de esto", "Muéstrame el código completo", "Explícame el siguiente concepto", "Quiero intentarlo yo solo". NUNCA omitas este bloque.`;
 
 // ─── MODULE DATA ──────────────────────────────────────────────────────────────
 const P = {
@@ -213,193 +211,288 @@ const P = {
 };
 
 const MODULES = [
-  {id:"00",emoji:"🧠",name:"Fundamentos y mentalidad",sub:"Cómo piensa Claude, anatomía del prompt, primeros experimentos",weeks:"1 semana",hours:"14–28h",color:P.blue,level:"Básico",
-   system:`Eres un tutor experto en IA generativa. El estudiante está en el Módulo 00 — Fundamentos de Claude. Nivel: básico. Guía con ejercicios prácticos, mini-retos y ejemplos concretos. Cuando expliques un concepto, incluye un ejercicio que puedan hacer ahora mismo. Sé conciso, motivador y hands-on. Responde siempre en español.`,
-   topics:["¿Qué es un LLM y cómo funciona internamente?","Cómo procesa Claude tu input (tokens, contexto)","Anatomía del prompt: rol, tarea, contexto, formato","Context window: límites y estrategias","Diferencias entre modelos: Haiku, Sonnet, Opus","Claude.ai UI completo: shortcuts y funciones ocultas","Historial de conversaciones y gestión","Temperatura y parámetros de creatividad"],
-   projects:[{t:"Experimento de control de tono",d:"Mismo prompt, 5 variaciones — mide cómo cambia el output",tag:"Exploración"},{t:"Mapa del context window",d:"Visualiza cuándo Claude olvida información en conversaciones largas",tag:"Análisis"},{t:"Comparativa de modelos",d:"Misma tarea en Haiku, Sonnet y Opus — documenta diferencias",tag:"Benchmark"}]},
-
-  {id:"01",emoji:"⚡",name:"Prompt Engineering maestría",sub:"Técnicas avanzadas, frameworks y debugging de prompts",weeks:"2 semanas",hours:"28–56h",color:P.green,level:"Intermedio",
-   system:`Eres un experto en Prompt Engineering. Módulo 01. Enseña: Chain of Thought, few-shot, XML tags, role prompting, prompt chaining. Muestra prompts antes y después. Cuando el estudiante comparta un prompt, analízalo y sugiere mejoras concretas con ejemplos. Responde en español.`,
-   topics:["Zero-shot vs few-shot vs many-shot prompting","Chain of Thought (CoT) y Tree of Thought","Role prompting: personas y expertos ficticios","XML tags para estructurar prompts complejos","System prompts: diseño y buenas prácticas","Prompt chaining: dividir tareas complejas","Negative prompting: decirle a Claude qué NO hacer","Evaluación y debugging de prompts","Prompts para código, análisis y creatividad","Prompt libraries reutilizables"],
-   projects:[{t:"Biblioteca personal de prompts",d:"20 prompts reutilizables categorizados por caso de uso",tag:"Librería"},{t:"Pipeline de análisis de datos",d:"Chain de 4 pasos: extrae → limpia → analiza → visualiza",tag:"Pipeline"},{t:"Prompt debugger",d:"Toma 3 prompts rotos y corrígelos en menos de 3 iteraciones",tag:"Debugging"}]},
-
-  {id:"02",emoji:"🎨",name:"Artifacts & creación visual",sub:"React, HTML/CSS/JS, SVG, storage persistente, apps interactivas",weeks:"2 semanas",hours:"28–56h",color:P.amber,level:"Intermedio",
-   system:`Eres experto en crear Artifacts con Claude (React, HTML, SVG). Módulo 02. Cuando el estudiante quiera construir algo, genera el código funcional completo listo para pegar en Claude. Explica el código si es necesario. Propón mini-proyectos progresivos. Responde en español.`,
-   topics:["Qué son los Artifacts y cuándo usarlos","HTML/CSS/JS básico en Artifacts","React Artifacts: JSX, componentes, props","Hooks: useState, useEffect, useCallback","Tailwind CSS utility classes","Gráficas con Recharts y Chart.js","SVG generativo y diagramas","Persistent storage API","Artifacts multi-componente","Depurar errores en Artifacts"],
-   projects:[{t:"Dashboard personal interactivo",d:"Tracker de hábitos con storage persistente en React",tag:"App"},{t:"Generador de reportes visuales",d:"Sube CSV → gráficas + análisis en un Artifact",tag:"Generador"},{t:"Mini-app funcional propia",d:"Calculadora financiera, kanban o juego de lógica",tag:"Libre"}]},
-
-  {id:"03",emoji:"🔧",name:"Skills, MCP y automatización",sub:"Crea y combina skills, MCP servers, flujos automatizados",weeks:"1.5 semanas",hours:"21–42h",color:P.purple,level:"Avanzado",
-   system:`Eres experto en Skills de Claude y Model Context Protocol (MCP). Módulo 03. Cuando el estudiante describa una tarea, ayúdalo a convertirla en un skill funcional con el SKILL.md exacto. Muestra ejemplos reales y completos. Responde en español.`,
-   topics:["Qué son los Skills en Claude y cómo activarlos","Anatomía de un SKILL.md: estructura y campos","Crear skills personalizados desde cero","Skills para lectura y procesamiento de archivos","Model Context Protocol (MCP): qué es","Conectar MCP servers externos","Integración con Google Drive y Slack","Automatización de workflows repetitivos","Skills encadenados y composición","Testing y validación de skills"],
-   projects:[{t:"Skill personalizado para tu trabajo",d:"Implementa un SKILL.md para una tarea repetitiva",tag:"Skill"},{t:"Pipeline de documentos",d:"Lee PDFs, extrae datos y genera reporte Word",tag:"Auto"},{t:"MCP server local",d:"Conecta Claude a tu sistema de archivos local",tag:"MCP"}]},
-
-  {id:"04",emoji:"🚀",name:"API de Anthropic + Python & JS",sub:"Python esencial, JavaScript/Node.js y la Messages API completa",weeks:"3 semanas",hours:"42–84h",color:P.red,level:"Avanzado",
-   system:`Eres mentor técnico experto en Python, JavaScript y la API de Anthropic. Módulo 04. Este módulo tiene 3 partes: Python esencial, JavaScript/Node.js, y la API de Anthropic. Enseña desde cero con ejercicios progresivos y soluciones. Pregunta al estudiante con qué lenguaje quiere empezar. Responde en español.`,
-   submodules:[
-     {id:"04-PY",icon:"🐍",name:"Python esencial para la API",color:"#1D4ED8",bg:"#EFF6FF",dur:"1 semana",
-      topics:["Instalación: Python, pip, entornos virtuales","Variables, tipos, listas y diccionarios","Funciones, clases y módulos","Archivos: leer/escribir JSON y TXT","Peticiones HTTP con requests","Errores: try/except/finally","Variables de entorno y .env","async/await con asyncio","Anthropic Python SDK","Jupyter Notebooks"],
-      projects:[{t:"Script de análisis de texto",d:"Lee un .txt y usa Claude via API para resumir y extraer entidades",tag:"Script"},{t:"Procesador masivo",d:"Loop que procesa 50 archivos y guarda resultados en JSON",tag:"Batch"}]},
-     {id:"04-JS",icon:"⚡",name:"JavaScript/Node.js para la API",color:"#B45309",bg:"#FFFBEB",dur:"1 semana",
-      topics:["Node.js: npm y package.json","Variables, arrow functions, destructuring","Promesas y async/await","Fetch API y JSON","Módulos ES6: import/export","try/catch en async","dotenv y variables de entorno","Express.js básico","Anthropic JS SDK","Testing con Jest/Vitest"],
-      projects:[{t:"Chatbot CLI en Node.js",d:"CLI que mantiene historial de conversación con Claude",tag:"CLI"},{t:"API REST con Express",d:"Servidor /chat que llama a Claude internamente",tag:"Backend"}]},
-     {id:"04-API",icon:"🔌",name:"Messages API completa",color:"#B91C1C",bg:"#FEF2F2",dur:"1 semana",
-      topics:["Setup y autenticación","System prompts y personalidad","Historial multi-turn","Tool use / Function calling","Streaming de respuestas","Batch processing","Prompt caching","Rate limits y reintentos","Optimización de costos","Logging y observabilidad"],
-      projects:[{t:"Chatbot con memoria persistente",d:"API + SQLite → asistente que recuerda conversaciones",tag:"Full stack"},{t:"Agente con herramientas",d:"Claude que busca, lee archivos y ejecuta código",tag:"Agente"},{t:"API en producción",d:"Deploy en Railway/Vercel con logs y rate limits",tag:"Deploy"}]}
-   ],
-   topics:[],projects:[]},
-
-  {id:"05",emoji:"🏗️",name:"Proyectos integradores",sub:"Combina todo en soluciones completas y desplegables",weeks:"2 semanas",hours:"28–56h",color:P.cyan,level:"Experto",
-   system:`Eres arquitecto de soluciones con IA. Módulo 05. Actúa como tech lead: revisa arquitectura, haz code review, ayuda a descomponer proyectos en tareas accionables. Guía al estudiante a construir su primer producto completo con IA. Responde en español.`,
-   topics:["Arquitectura de soluciones con IA","Gestión de estado en apps conversacionales","UX/UI para apps con IA: patrones y antipatrones","Seguridad: validación y prompt injection","Optimización de costos en producción","Monitoreo, logging y alertas","CI/CD para apps con IA","Documentación y handoff"],
-   projects:[{t:"Asistente personal full-stack",d:"App web con auth, historial, personalidad y skills propios",tag:"Flagship"},{t:"Automatizador de workflows",d:"Lee emails → extrae tareas → crea tickets en Jira/Notion",tag:"Auto"},{t:"Producto propio con Claude",d:"Un problema real → solución completa con deploy",tag:"Capstone"}]},
-
-  {id:"06",emoji:"🌟",name:"Nivel experto y frontier",sub:"Claude Code, agents, multimodal, RAG y arquitecturas avanzadas",weeks:"1 semana",hours:"14–28h",color:P.violet,level:"Experto",
-   system:`Eres experto en técnicas frontier de IA: multi-agent systems, RAG, Claude Code, evaluaciones. Módulo 06. Propón desafíos ambiciosos y guía en implementaciones complejas. Responde en español.`,
-   topics:["Claude Code (CLI): instalación y flujos","Multi-agent systems: orquestar varios Claude","Prompt injection y seguridad avanzada","Evaluaciones (evals): medir calidad","Multimodal: análisis de imágenes y documentos","Embeddings y búsqueda semántica","RAG paso a paso","Contribuir a la comunidad"],
-   projects:[{t:"Agente de código autónomo",d:"Claude Code refactoriza un repo con instrucciones de alto nivel",tag:"Claude Code"},{t:"Sistema RAG funcional",d:"Embeddings + búsqueda vectorial + Claude = chat con tus docs",tag:"RAG"}]},
+  {
+    id:"00", emoji:"🧠", name:"Fundamentos y mentalidad",
+    sub:"Cómo piensa Claude, anatomía del prompt, primeros experimentos",
+    weeks:"1 semana", hours:"14–28h", color:P.blue, level:"Básico",
+    system:"Eres un tutor experto en IA generativa. Módulo 00 — Fundamentos de Claude. Nivel: básico. Guía con ejercicios prácticos, mini-retos y ejemplos concretos. Cuando expliques un concepto, incluye un ejercicio que puedan hacer ahora mismo. Sé conciso, motivador y hands-on. Responde siempre en español." + ACTION_SUFFIX,
+    topics:["¿Qué es un LLM y cómo funciona internamente?","Cómo procesa Claude tu input (tokens, contexto)","Anatomía del prompt: rol, tarea, contexto, formato","Context window: límites y estrategias","Diferencias entre modelos: Haiku, Sonnet, Opus","Claude.ai UI completo: shortcuts y funciones ocultas","Historial de conversaciones y gestión","Temperatura y parámetros de creatividad"],
+    projects:[{t:"Experimento de control de tono",d:"Mismo prompt, 5 variaciones — mide cómo cambia el output",tag:"Exploración"},{t:"Mapa del context window",d:"Visualiza cuándo Claude olvida información en conversaciones largas",tag:"Análisis"},{t:"Comparativa de modelos",d:"Misma tarea en Haiku, Sonnet y Opus — documenta diferencias",tag:"Benchmark"}],
+  },
+  {
+    id:"01", emoji:"⚡", name:"Prompt Engineering maestría",
+    sub:"Técnicas avanzadas, frameworks y debugging de prompts",
+    weeks:"2 semanas", hours:"28–56h", color:P.green, level:"Intermedio",
+    system:"Eres un experto en Prompt Engineering. Módulo 01. Enseña: CoT, few-shot, XML tags, role prompting, prompt chaining. Muestra prompts antes y después. Cuando el estudiante comparta un prompt, analízalo y sugiere mejoras concretas con ejemplos. Responde en español." + ACTION_SUFFIX,
+    topics:["Zero-shot vs few-shot vs many-shot prompting","Chain of Thought (CoT) y Tree of Thought","Role prompting: personas y expertos ficticios","XML tags para estructurar prompts complejos","System prompts: diseño y buenas prácticas","Prompt chaining: dividir tareas complejas","Negative prompting: decirle a Claude qué NO hacer","Evaluación y debugging de prompts","Prompts para código, análisis y creatividad","Prompt libraries reutilizables"],
+    projects:[{t:"Biblioteca personal de prompts",d:"20 prompts reutilizables categorizados por caso de uso",tag:"Librería"},{t:"Pipeline de análisis de datos",d:"Chain de 4 pasos: extrae → limpia → analiza → visualiza",tag:"Pipeline"},{t:"Prompt debugger",d:"Toma 3 prompts rotos y corrígelos en menos de 3 iteraciones",tag:"Debugging"}],
+  },
+  {
+    id:"02", emoji:"🎨", name:"Artifacts & creación visual",
+    sub:"React, HTML/CSS/JS, SVG, storage persistente, apps interactivas",
+    weeks:"2 semanas", hours:"28–56h", color:P.amber, level:"Intermedio",
+    system:"Eres experto en crear Artifacts con Claude (React, HTML, SVG). Módulo 02. Cuando el estudiante quiera construir algo, genera el código funcional completo listo para pegar en Claude. Explica el código si es necesario. Propón mini-proyectos progresivos. Responde en español." + ACTION_SUFFIX,
+    topics:["Qué son los Artifacts y cuándo usarlos","HTML/CSS/JS básico en Artifacts","React Artifacts: JSX, componentes, props","Hooks: useState, useEffect, useCallback","Tailwind CSS utility classes","Gráficas con Recharts y Chart.js","SVG generativo y diagramas","Persistent storage API","Artifacts multi-componente","Depurar errores en Artifacts"],
+    projects:[{t:"Dashboard personal interactivo",d:"Tracker de hábitos con storage persistente en React",tag:"App"},{t:"Generador de reportes visuales",d:"Sube CSV → gráficas + análisis en un Artifact",tag:"Generador"},{t:"Mini-app funcional propia",d:"Calculadora financiera, kanban o juego de lógica",tag:"Libre"}],
+  },
+  {
+    id:"03", emoji:"🔧", name:"Skills, MCP y automatización",
+    sub:"Crea y combina skills, MCP servers, flujos automatizados",
+    weeks:"1.5 semanas", hours:"21–42h", color:P.purple, level:"Avanzado",
+    system:"Eres experto en Skills de Claude y Model Context Protocol (MCP). Módulo 03. Cuando el estudiante describa una tarea, ayúdalo a convertirla en un skill funcional con el SKILL.md exacto. Muestra ejemplos reales y completos. Responde en español." + ACTION_SUFFIX,
+    topics:["Qué son los Skills en Claude y cómo activarlos","Anatomía de un SKILL.md: estructura y campos","Crear skills personalizados desde cero","Skills para lectura y procesamiento de archivos","Model Context Protocol (MCP): qué es","Conectar MCP servers externos","Integración con Google Drive y Slack","Automatización de workflows repetitivos","Skills encadenados y composición","Testing y validación de skills"],
+    projects:[{t:"Skill personalizado para tu trabajo",d:"Implementa un SKILL.md para una tarea repetitiva",tag:"Skill"},{t:"Pipeline de documentos",d:"Lee PDFs, extrae datos y genera reporte Word",tag:"Auto"},{t:"MCP server local",d:"Conecta Claude a tu sistema de archivos local",tag:"MCP"}],
+  },
+  {
+    id:"04", emoji:"🚀", name:"API de Anthropic + Python & JS",
+    sub:"Python esencial, JavaScript/Node.js y la Messages API completa",
+    weeks:"3 semanas", hours:"42–84h", color:P.red, level:"Avanzado",
+    system:"Eres mentor técnico experto en Python, JavaScript y la API de Anthropic. Módulo 04. Enseña desde cero con ejercicios progresivos. Pregunta al estudiante con qué lenguaje quiere empezar. Responde en español." + ACTION_SUFFIX,
+    submodules:[
+      {id:"04-PY",icon:"🐍",name:"Python esencial para la API",color:"#1D4ED8",bg:"#EFF6FF",dur:"1 semana",
+       topics:["Instalación: Python, pip, entornos virtuales","Variables, tipos, listas y diccionarios","Funciones, clases y módulos","Archivos: leer/escribir JSON y TXT","Peticiones HTTP con requests","Errores: try/except/finally","Variables de entorno y .env","async/await con asyncio","Anthropic Python SDK","Jupyter Notebooks"],
+       projects:[{t:"Script de análisis de texto",d:"Lee un .txt y usa Claude via API para resumir y extraer entidades",tag:"Script"},{t:"Procesador masivo",d:"Loop que procesa 50 archivos y guarda en JSON",tag:"Batch"}]},
+      {id:"04-JS",icon:"⚡",name:"JavaScript/Node.js para la API",color:"#B45309",bg:"#FFFBEB",dur:"1 semana",
+       topics:["Node.js: npm y package.json","Variables, arrow functions, destructuring","Promesas y async/await","Fetch API y JSON","Módulos ES6: import/export","try/catch en async","dotenv y variables de entorno","Express.js básico","Anthropic JS SDK","Testing con Jest/Vitest"],
+       projects:[{t:"Chatbot CLI en Node.js",d:"CLI que mantiene historial de conversación con Claude",tag:"CLI"},{t:"API REST con Express",d:"Servidor /chat que llama a Claude internamente",tag:"Backend"}]},
+      {id:"04-API",icon:"🔌",name:"Messages API completa",color:"#B91C1C",bg:"#FEF2F2",dur:"1 semana",
+       topics:["Setup y autenticación","System prompts y personalidad","Historial multi-turn","Tool use / Function calling","Streaming de respuestas","Batch processing","Prompt caching","Rate limits y reintentos","Optimización de costos","Logging y observabilidad"],
+       projects:[{t:"Chatbot con memoria persistente",d:"API + SQLite → asistente que recuerda conversaciones",tag:"Full stack"},{t:"Agente con herramientas",d:"Claude que busca, lee archivos y ejecuta código",tag:"Agente"},{t:"API en producción",d:"Deploy en Railway/Vercel con logs y rate limits",tag:"Deploy"}]},
+    ],
+    topics:[], projects:[],
+  },
+  {
+    id:"05", emoji:"🏗️", name:"Proyectos integradores",
+    sub:"Combina todo en soluciones completas y desplegables",
+    weeks:"2 semanas", hours:"28–56h", color:P.cyan, level:"Experto",
+    system:"Eres arquitecto de soluciones con IA. Módulo 05. Actúa como tech lead: revisa arquitectura, haz code review, ayuda a descomponer proyectos en tareas accionables. Guía al estudiante a construir su primer producto completo con IA. Responde en español." + ACTION_SUFFIX,
+    topics:["Arquitectura de soluciones con IA","Gestión de estado en apps conversacionales","UX/UI para apps con IA: patrones y antipatrones","Seguridad: validación y prompt injection","Optimización de costos en producción","Monitoreo, logging y alertas","CI/CD para apps con IA","Documentación y handoff"],
+    projects:[{t:"Asistente personal full-stack",d:"App web con auth, historial, personalidad y skills propios",tag:"Flagship"},{t:"Automatizador de workflows",d:"Lee emails → extrae tareas → crea tickets en Jira/Notion",tag:"Auto"},{t:"Producto propio con Claude",d:"Un problema real → solución completa con deploy",tag:"Capstone"}],
+  },
+  {
+    id:"06", emoji:"🌟", name:"Nivel experto y frontier",
+    sub:"Claude Code, agents, multimodal, RAG y arquitecturas avanzadas",
+    weeks:"1 semana", hours:"14–28h", color:P.violet, level:"Experto",
+    system:"Eres experto en técnicas frontier de IA: multi-agent systems, RAG, Claude Code, evaluaciones. Módulo 06. Propón desafíos ambiciosos y guía en implementaciones complejas. Responde en español." + ACTION_SUFFIX,
+    topics:["Claude Code (CLI): instalación y flujos","Multi-agent systems: orquestar varios Claude","Prompt injection y seguridad avanzada","Evaluaciones (evals): medir calidad de outputs","Multimodal: análisis de imágenes y documentos","Embeddings y búsqueda semántica","RAG paso a paso","Contribuir a la comunidad"],
+    projects:[{t:"Agente de código autónomo",d:"Claude Code refactoriza un repo con instrucciones de alto nivel",tag:"Claude Code"},{t:"Sistema RAG funcional",d:"Embeddings + búsqueda vectorial + Claude = chat con tus docs",tag:"RAG"}],
+  },
 ];
 
-// ─── STORAGE HOOK ─────────────────────────────────────────────────────────────
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
 function useLS(key, init) {
-  const [v,setV] = useState(()=>{ try{const s=localStorage.getItem(key);return s?JSON.parse(s):init;}catch{return init;} });
-  const set = x => { const n=typeof x==="function"?x(v):x; setV(n); try{localStorage.setItem(key,JSON.stringify(n));}catch{} };
-  return [v,set];
+  const [v,setV] = useState(function() {
+    try { var s = localStorage.getItem(key); return s ? JSON.parse(s) : init; } catch(e) { return init; }
+  });
+  const set = function(x) {
+    var n = typeof x === "function" ? x(v) : x;
+    setV(n);
+    try { localStorage.setItem(key, JSON.stringify(n)); } catch(e) {}
+  };
+  return [v, set];
 }
 
 // ─── RING ─────────────────────────────────────────────────────────────────────
-function Ring({pct=0,size=48,sw=4,color="#111827"}) {
-  const r=(size-sw)/2,c=2*Math.PI*r;
-  return <svg width={size} height={size} style={{transform:"rotate(-90deg)",flexShrink:0}}>
-    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#E5E7EB" strokeWidth={sw}/>
-    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={sw}
-      strokeDasharray={c} strokeDashoffset={c*(1-Math.min(pct,100)/100)} strokeLinecap="round"
-      style={{transition:"stroke-dashoffset .6s ease"}}/>
-    <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
-      style={{transform:"rotate(90deg)",transformOrigin:"50% 50%",fontSize:size*.21,fontWeight:700,fill:color}}>
-      {Math.round(pct)}%
-    </text>
-  </svg>;
+function Ring({pct, size, sw, color}) {
+  pct = pct || 0; size = size || 48; sw = sw || 4; color = color || "#111827";
+  var r = (size-sw)/2, c = 2*Math.PI*r;
+  return (
+    <svg width={size} height={size} style={{transform:"rotate(-90deg)",flexShrink:0}}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#E5E7EB" strokeWidth={sw}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={sw}
+        strokeDasharray={c} strokeDashoffset={c*(1-Math.min(pct,100)/100)} strokeLinecap="round"
+        style={{transition:"stroke-dashoffset .6s ease"}}/>
+      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central"
+        style={{transform:"rotate(90deg)",transformOrigin:"50% 50%",fontSize:size*.21,fontWeight:700,fill:color}}>
+        {Math.round(pct)}%
+      </text>
+    </svg>
+  );
 }
 
 // ─── PILL ─────────────────────────────────────────────────────────────────────
 function Pill({label,color,bg}) {
-  return <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:bg,color,
-    letterSpacing:".04em",textTransform:"uppercase",whiteSpace:"nowrap",lineHeight:1}}>{label}</span>;
+  return (
+    <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:bg,color:color,
+      letterSpacing:".04em",textTransform:"uppercase",whiteSpace:"nowrap",lineHeight:1}}>
+      {label}
+    </span>
+  );
 }
 
 // ─── MARKDOWN LITE ────────────────────────────────────────────────────────────
-function Md({text=""}) {
-  const lines=text.split("\n"); const els=[]; let inCode=false,codeLines=[],lang="",i=0;
-  const inline=(str,k)=>{
-    const parts=str.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-    return <span key={k}>{parts.map((p,j)=>{
-      if(p.startsWith("**")&&p.endsWith("**"))return<strong key={j} style={{fontWeight:700}}>{p.slice(2,-2)}</strong>;
-      if(p.startsWith("`")&&p.endsWith("`"))return<code key={j} style={{background:"#F1F5F9",color:"#0F172A",padding:"1px 5px",borderRadius:4,fontSize:".88em",fontFamily:"monospace"}}>{p.slice(1,-1)}</code>;
-      return p;
-    })}</span>;
-  };
-  while(i<lines.length){
-    const l=lines[i];
-    if(l.startsWith("```")){
-      if(!inCode){inCode=true;lang=l.slice(3);codeLines=[];}
-      else{els.push(<div key={i} style={{background:"#1E293B",borderRadius:8,padding:"12px 14px",margin:"8px 0",overflowX:"auto"}}>
-        {lang&&<div style={{fontSize:10,color:"#64748B",marginBottom:4,fontFamily:"monospace"}}>{lang}</div>}
-        <pre style={{margin:0,fontSize:12,color:"#E2E8F0",fontFamily:"'Courier New',monospace",whiteSpace:"pre",lineHeight:1.6}}>{codeLines.join("\n")}</pre>
-      </div>);inCode=false;codeLines=[];}
-    } else if(inCode){codeLines.push(l);}
-    else if(l.match(/^#{1,3} /)){const lv=l.match(/^(#+)/)[1].length,txt=l.replace(/^#+\s/,"");els.push(<div key={i} style={{fontWeight:700,fontSize:lv===1?16:lv===2?14:13,color:"#111827",margin:"12px 0 4px"}}>{inline(txt,0)}</div>);}
-    else if(l.match(/^[-*] /)){els.push(<div key={i} style={{display:"flex",gap:8,margin:"3px 0"}}><span style={{color:"#9CA3AF",flexShrink:0,marginTop:2}}>•</span><span style={{fontSize:13,color:"#374151",lineHeight:1.6}}>{inline(l.slice(2),0)}</span></div>);}
-    else if(l.trim()===""){els.push(<div key={i} style={{height:5}}/>);}
-    else{els.push(<p key={i} style={{margin:"3px 0",fontSize:13,color:"#374151",lineHeight:1.7}}>{inline(l,0)}</p>);}
+function Md({text}) {
+  text = text || "";
+  var lines = text.split("\n");
+  var els = [];
+  var inCode = false, codeLines = [], lang = "", i = 0;
+
+  function inline(str, k) {
+    var parts = str.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+    return (
+      <span key={k}>
+        {parts.map(function(p, j) {
+          if (p.startsWith("**") && p.endsWith("**"))
+            return <strong key={j} style={{fontWeight:700}}>{p.slice(2,-2)}</strong>;
+          if (p.startsWith("`") && p.endsWith("`"))
+            return <code key={j} style={{background:"#F1F5F9",color:"#0F172A",padding:"1px 5px",borderRadius:4,fontSize:".88em",fontFamily:"monospace"}}>{p.slice(1,-1)}</code>;
+          return p;
+        })}
+      </span>
+    );
+  }
+
+  while (i < lines.length) {
+    var l = lines[i];
+    if (l.startsWith("```")) {
+      if (!inCode) { inCode = true; lang = l.slice(3); codeLines = []; }
+      else {
+        els.push(
+          <div key={i} style={{background:"#1E293B",borderRadius:8,padding:"12px 14px",margin:"8px 0",overflowX:"auto"}}>
+            {lang && <div style={{fontSize:10,color:"#64748B",marginBottom:4,fontFamily:"monospace"}}>{lang}</div>}
+            <pre style={{margin:0,fontSize:12,color:"#E2E8F0",fontFamily:"'Courier New',monospace",whiteSpace:"pre",lineHeight:1.6}}>{codeLines.join("\n")}</pre>
+          </div>
+        );
+        inCode = false; codeLines = [];
+      }
+    } else if (inCode) {
+      codeLines.push(l);
+    } else if (l.match(/^#{1,3} /)) {
+      var lv = l.match(/^(#+)/)[1].length;
+      var txt = l.replace(/^#+\s/, "");
+      els.push(<div key={i} style={{fontWeight:700,fontSize:lv===1?16:lv===2?14:13,color:"#111827",margin:"12px 0 4px"}}>{inline(txt,0)}</div>);
+    } else if (l.match(/^[-*] /)) {
+      els.push(
+        <div key={i} style={{display:"flex",gap:8,margin:"3px 0"}}>
+          <span style={{color:"#9CA3AF",flexShrink:0,marginTop:2}}>•</span>
+          <span style={{fontSize:13,color:"#374151",lineHeight:1.6}}>{inline(l.slice(2),0)}</span>
+        </div>
+      );
+    } else if (l.trim() === "") {
+      els.push(<div key={i} style={{height:5}}/>);
+    } else {
+      els.push(<p key={i} style={{margin:"3px 0",fontSize:13,color:"#374151",lineHeight:1.7}}>{inline(l,0)}</p>);
+    }
     i++;
   }
   return <div>{els}</div>;
 }
 
-// ─── SETUP SCREEN ─────────────────────────────────────────────────────────────
+// ─── ACTION BAR ───────────────────────────────────────────────────────────────
+function ActionBar({actions, color, onAction, disabled}) {
+  if (!actions || actions.length === 0) return null;
+  return (
+    <div style={{marginTop:8,padding:"10px 12px",background:"#F8FAFC",borderRadius:10,border:"1px solid #E2E8F0"}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:".06em",marginBottom:7}}>
+        ¿Qué quieres hacer ahora?
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {actions.map(function(a, i) {
+          return (
+            <button key={i} className="btn-action"
+              style={{animationDelay:(i*0.06)+"s"}}
+              onClick={function() { if (!disabled) onAction(a); }}
+              disabled={disabled}
+              onMouseEnter={function(e) { if (!disabled) e.currentTarget.style.background = i===0 ? color+"22" : "#F1F5F9"; }}
+              onMouseLeave={function(e) { e.currentTarget.style.background = i===0 ? color+"0D" : "white"; }}>
+              <span style={{
+                display:"flex", alignItems:"center", gap:8,
+                padding:"9px 12px", borderRadius:8,
+                border:"1.5px solid "+(i===0 ? color+"50" : "#E2E8F0"),
+                background: i===0 ? color+"0D" : "white",
+                fontSize:13, color: i===0 ? color : "#374151",
+                fontWeight: i===0 ? 600 : 400,
+                cursor: disabled ? "not-allowed" : "pointer",
+                textAlign:"left", lineHeight:1.4,
+                opacity: disabled ? 0.5 : 1,
+                transition:"background .12s",
+                fontFamily:"inherit",
+              }}>
+                <span style={{fontSize:13,flexShrink:0}}>{i===0?"▶":"→"}</span>
+                {a}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── SETUP ────────────────────────────────────────────────────────────────────
 function Setup({onSave}) {
   const [provider, setProvider] = useState("gemini");
   const [key, setKey] = useState("");
   const [err, setErr] = useState("");
   const prov = PROVIDERS[provider];
 
-  const handleProviderSwitch = (id) => { setProvider(id); setKey(""); setErr(""); };
-
-  const verify = () => {
+  function handleSwitch(id) { setProvider(id); setKey(""); setErr(""); }
+  function verify() {
     setErr("");
     try { testKey(provider, key); onSave(provider, key.trim()); }
     catch(e) { setErr(e.message); }
-  };
+  }
 
   return (
     <div style={{minHeight:"100vh",background:"#F0EFE9",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{background:"white",borderRadius:24,padding:28,maxWidth:420,width:"100%",boxShadow:"0 8px 32px rgba(0,0,0,.1)"}}>
-
-        {/* Header */}
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{width:60,height:60,borderRadius:18,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 12px"}}>🎓</div>
           <h1 style={{fontSize:22,fontWeight:900,color:"#111827",marginBottom:6}}>Claude Bootcamp</h1>
           <p style={{fontSize:13,color:"#6B7280",lineHeight:1.6}}>Elige tu proveedor de IA gratuito para activar el tutor en cada módulo</p>
         </div>
 
-        {/* Provider selector */}
         <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>
           Paso 1 — Elige tu proveedor
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
-          {Object.values(PROVIDERS).map(p => (
-            <button key={p.id} onClick={()=>handleProviderSwitch(p.id)} style={{
-              display:"flex",alignItems:"center",gap:12,padding:"13px 14px",borderRadius:14,
-              border:`2px solid ${provider===p.id?p.color:"#E5E7EB"}`,
-              background:provider===p.id?p.bg:"white",
-              cursor:"pointer",textAlign:"left",transition:"all .15s",
-            }}>
-              <span style={{fontSize:22,flexShrink:0}}>{p.emoji}</span>
-              <div style={{flex:1}}>
-                <div style={{display:"flex",alignItems:"center",gap:7}}>
-                  <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{p.name}</span>
-                  {p.recommended && <span style={{fontSize:10,fontWeight:700,background:"#ECFDF5",color:"#047857",padding:"1px 7px",borderRadius:20}}>Recomendado</span>}
+          {Object.values(PROVIDERS).map(function(p) {
+            return (
+              <button key={p.id} onClick={function() { handleSwitch(p.id); }} style={{
+                display:"flex",alignItems:"center",gap:12,padding:"13px 14px",borderRadius:14,
+                border:"2px solid "+(provider===p.id ? p.color : "#E5E7EB"),
+                background: provider===p.id ? p.bg : "white",
+                cursor:"pointer",textAlign:"left",transition:"all .15s",width:"100%",fontFamily:"inherit",
+              }}>
+                <span style={{fontSize:22,flexShrink:0}}>{p.emoji}</span>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7}}>
+                    <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{p.name}</span>
+                    {p.recommended && <span style={{fontSize:10,fontWeight:700,background:"#ECFDF5",color:"#047857",padding:"1px 7px",borderRadius:20}}>Recomendado</span>}
+                  </div>
+                  <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}>
+                    {p.limits.map(function(l,i) {
+                      return <span key={i} style={{fontSize:10,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px"}}>{l}</span>;
+                    })}
+                  </div>
                 </div>
-                <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}>
-                  {p.limits.map((l,i)=><span key={i} style={{fontSize:10,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px"}}>{l}</span>)}
+                <div style={{width:20,height:20,borderRadius:"50%",border:"2px solid "+(provider===p.id ? p.color : "#D1D5DB"),background:provider===p.id ? p.color : "white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  {provider===p.id && <div style={{width:8,height:8,borderRadius:"50%",background:"white"}}/>}
                 </div>
-              </div>
-              <div style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${provider===p.id?p.color:"#D1D5DB"}`,background:provider===p.id?p.color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                {provider===p.id&&<div style={{width:8,height:8,borderRadius:"50%",background:"white"}}/>}
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Key input */}
         <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>
           Paso 2 — Ingresa tu API key de {prov.name}
         </div>
-        <div style={{position:"relative",marginBottom:8}}>
-          <input value={key} onChange={e=>{ setKey(e.target.value.trim()); setErr(""); }}
-            placeholder={prov.keyPlaceholder} type="password"
-            style={{width:"100%",padding:"11px 14px",borderRadius:10,
-              border:`1.5px solid ${err?"#FECACA":key?prov.color:"#E5E7EB"}`,
-              fontSize:13,outline:"none",fontFamily:"monospace",
-              background:err?"#FEF2F2":"white",transition:"border-color .15s"}}/>
-        </div>
+        <input value={key} onChange={function(e) { setKey(e.target.value.trim()); setErr(""); }}
+          placeholder={prov.keyPlaceholder} type="password"
+          style={{width:"100%",padding:"11px 14px",borderRadius:10,
+            border:"1.5px solid "+(err ? "#FECACA" : key ? prov.color : "#E5E7EB"),
+            fontSize:13,outline:"none",fontFamily:"monospace",marginBottom:6,
+            background:err?"#FEF2F2":"white",transition:"border-color .15s"}}/>
         {err && <p style={{fontSize:12,color:"#B91C1C",marginBottom:8,padding:"6px 10px",background:"#FEF2F2",borderRadius:8}}>{err}</p>}
 
-        {/* Key link */}
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:20,padding:"8px 10px",background:"#F9FAFB",borderRadius:8,border:"1px solid #E5E7EB"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,padding:"8px 10px",background:"#F9FAFB",borderRadius:8,border:"1px solid #E5E7EB"}}>
           <span style={{fontSize:13}}>🔗</span>
           <span style={{fontSize:11,color:"#6B7280"}}>{prov.keyHint} — </span>
           <a href={prov.keyUrl} target="_blank" rel="noreferrer" style={{fontSize:11,color:prov.color,fontWeight:700,textDecoration:"none"}}>Ir ahora →</a>
         </div>
-
-        {/* Privacy note */}
-        <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:10,padding:"9px 12px",marginBottom:10,display:"flex",gap:8}}>
-          <span style={{fontSize:13,flexShrink:0}}>⚠️</span>
-          <p style={{fontSize:11,color:"#92400E",margin:0,lineHeight:1.5}}><strong>Importante:</strong> el Tutor IA no funciona dentro del Artifact de Claude.ai (sandbox bloqueado). <strong>Despliega el HTML en Vercel o ábrelo en tu navegador local</strong> para que funcione correctamente.</p>
-        </div>
         <div style={{background:"#F0FDF4",border:"1px solid #A7F3D0",borderRadius:10,padding:"9px 12px",marginBottom:20,display:"flex",gap:8}}>
           <span style={{fontSize:13,flexShrink:0}}>🔒</span>
-          <p style={{fontSize:11,color:"#065F46",margin:0,lineHeight:1.5}}>Tu key se guarda <strong>solo en este navegador</strong> (localStorage). Nunca sale a ningún servidor externo.</p>
+          <p style={{fontSize:11,color:"#065F46",margin:0,lineHeight:1.5}}>Tu key se guarda <strong>solo en este navegador</strong>. Nunca sale a ningún servidor.</p>
         </div>
 
         <button onClick={verify} disabled={!key} style={{
@@ -407,7 +500,8 @@ function Setup({onSave}) {
           background:!key?"#E5E7EB":prov.color,
           color:!key?"#9CA3AF":"white",
           fontSize:14,fontWeight:700,cursor:!key?"not-allowed":"pointer",
-          transition:"all .15s",boxShadow:!key?"none":`0 4px 12px ${prov.color}40`,
+          transition:"all .15s",fontFamily:"inherit",
+          boxShadow:!key?"none":"0 4px 12px "+prov.color+"40",
         }}>
           Guardar y continuar →
         </button>
@@ -419,407 +513,604 @@ function Setup({onSave}) {
 // ─── CHAT ─────────────────────────────────────────────────────────────────────
 function Chat({mod, provider, apiKey}) {
   const prov = PROVIDERS[provider];
-  const [msgs, setMsgs] = useLS(`chat3_${provider}_${mod.id}`, []);
+  const [msgs, setMsgs] = useLS("chat4_" + provider + "_" + mod.id, []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState("");
+  const [pendingActions, setPendingActions] = useState(
+    msgs.length === 0 ? null : getDefaultActions(mod.id)
+  );
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
-  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs,streaming]);
+  useEffect(function() {
+    if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:"smooth"});
+  }, [msgs, streaming]);
 
-  const call = async (userMsg, history) => {
-    setLoading(true); setStreaming("");
-    try {
-      const full = await streamAI({
-        provider, apiKey,
-        systemPrompt: mod.system,
-        messages: [...history, {role:"user",content:userMsg}],
-        onChunk: t => setStreaming(t),
-      });
-      setStreaming("");
-      setMsgs(p=>[...p,{role:"user",content:userMsg},{role:"assistant",content:full}]);
-    } catch(e) {
-      setStreaming("");
-      let errMsg = e.message;
-      if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
-        errMsg = "❌ No se pudo conectar con la API. Si estás dentro de Claude.ai (Artifact), descarga el HTML y ábrelo en tu navegador local o despliégalo en Vercel/Netlify.";
-      } else if (errMsg.includes("not found for API version v1beta")) {
-  errMsg = "❌ Modelo Gemini obsoleto. Se actualizó automáticamente a Gemini 2.5 Flash. Prueba de nuevo.";
-}
-      setMsgs(p=>[...p,{role:"user",content:userMsg},{role:"assistant",content:`⚠️ ${errMsg}`}]);
+  // Restore actions from last message on mount
+  useEffect(function() {
+    var last = null;
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant") { last = msgs[i]; break; }
     }
-    setLoading(false);
-  };
+    if (last && last.actions && last.actions.length > 0) {
+      setPendingActions(last.actions);
+    } else if (msgs.length > 0) {
+      setPendingActions(getDefaultActions(mod.id));
+    }
+  }, []);
 
-  const send = () => { const t=input.trim(); if(!t||loading)return; setInput(""); call(t,msgs); setTimeout(()=>inputRef.current?.focus(),80); };
+  function call(userMsg, history) {
+    setLoading(true); setStreaming(""); setPendingActions(null);
+    var allMsgs = history.concat([{role:"user", content:userMsg}]);
+    streamAI({
+      provider:provider, apiKey:apiKey,
+      systemPrompt: mod.system,
+      messages: allMsgs,
+      onChunk: function(t) { setStreaming(t); },
+    }).then(function(full) {
+      setStreaming("");
+      var parsed = parseActions(full);
+      var actions = parsed.actions.length > 0 ? parsed.actions : getDefaultActions(mod.id);
+      var newMsgs = history.concat([
+        {role:"user", content:userMsg},
+        {role:"assistant", content:full, cleanText:parsed.text, actions:actions},
+      ]);
+      setMsgs(newMsgs);
+      setPendingActions(actions);
+    }).catch(function(e) {
+      setStreaming("");
+      var errMsg = e.message || "Error desconocido";
+      if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
+        errMsg = "No se pudo conectar. Abre este archivo en tu navegador local o en Vercel (no funciona dentro del Artifact de Claude.ai).";
+      }
+      var fallbackActions = getDefaultActions(mod.id);
+      var newMsgs = history.concat([
+        {role:"user", content:userMsg},
+        {role:"assistant", content:"⚠️ " + errMsg, cleanText:"⚠️ " + errMsg, actions:fallbackActions},
+      ]);
+      setMsgs(newMsgs);
+      setPendingActions(fallbackActions);
+    }).finally(function() {
+      setLoading(false);
+      setTimeout(function() { if (inputRef.current) inputRef.current.focus(); }, 80);
+    });
+  }
 
-  const starters = [
-    `Hola! Quiero comenzar el módulo "${mod.name}". Dame una primera sesión práctica de 2 horas con los conceptos clave y un ejercicio para empezar ahora mismo.`,
+  function send() {
+    var t = input.trim();
+    if (!t || loading) return;
+    setInput("");
+    call(t, msgs);
+  }
+
+  var starters = [
+    "Hola! Quiero comenzar el módulo \"" + mod.name + "\". Dame una primera sesión práctica de 2 horas con los conceptos clave y un ejercicio concreto para empezar ahora mismo.",
     "Dame un ejercicio práctico para hacer ahora",
     "Explícame el concepto más importante del módulo",
     "¿Cómo sé si estoy listo para el siguiente módulo?",
   ];
 
-  return <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
-    {/* header */}
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:"1px solid #F3F4F6",flexShrink:0,background:"white"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <div style={{width:30,height:30,borderRadius:8,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>{mod.emoji}</div>
-        <div>
-          <div style={{fontSize:12,fontWeight:700,color:"#111827"}}>Tutor IA — Módulo {mod.id}</div>
-          <div style={{display:"flex",alignItems:"center",gap:5,marginTop:1}}>
-            <span style={{fontSize:9}}>{prov.emoji}</span>
-            <span style={{fontSize:10,color:"#9CA3AF"}}>{prov.name} · {prov.model}</span>
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
+      {/* Chat header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:"1px solid #F3F4F6",flexShrink:0,background:"white"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:30,height:30,borderRadius:8,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>{mod.emoji}</div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"#111827"}}>Tutor IA — Módulo {mod.id}</div>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginTop:1}}>
+              <span style={{fontSize:9}}>{prov.emoji}</span>
+              <span style={{fontSize:10,color:"#9CA3AF"}}>{prov.name} · {prov.model}</span>
+            </div>
           </div>
         </div>
+        {msgs.length > 0 && (
+          <button onClick={function() { if (window.confirm("¿Borrar historial de esta sesión?")) { setMsgs([]); setPendingActions(null); } }}
+            style={{fontSize:11,color:"#9CA3AF",background:"none",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+            Nueva sesión
+          </button>
+        )}
       </div>
-      {msgs.length>0&&<button onClick={()=>{if(confirm("¿Borrar historial?"))setMsgs([]);}} style={{fontSize:11,color:"#9CA3AF",background:"none",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>Nueva sesión</button>}
-    </div>
 
-    {/* messages */}
-    <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:12,minHeight:0}}>
-      {msgs.length===0&&!loading&&(
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:300,gap:16,padding:"20px 0"}}>
-          <div style={{textAlign:"center"}}>
-            <div style={{width:64,height:64,borderRadius:20,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,margin:"0 auto 12px"}}>{mod.emoji}</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:4}}>Tutor listo</div>
-            <div style={{fontSize:12,color:"#6B7280",maxWidth:260,lineHeight:1.6,margin:"0 auto"}}>Especializado en <strong>{mod.name}</strong>. Usa {prov.name} ({prov.tag.toLowerCase()}).</div>
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:12,minHeight:0}}>
+
+        {/* Empty state */}
+        {msgs.length === 0 && !loading && (
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:260,gap:16,padding:"20px 0"}}>
+            <div style={{width:64,height:64,borderRadius:20,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>{mod.emoji}</div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:4}}>Tutor listo</div>
+              <div style={{fontSize:12,color:"#6B7280",maxWidth:260,lineHeight:1.6,margin:"0 auto"}}>
+                Especializado en <strong>{mod.name}</strong>
+              </div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:7,width:"100%",maxWidth:340}}>
+              {starters.map(function(q, i) {
+                return (
+                  <button key={i} onClick={function() { call(q, []); }} style={{
+                    background: i===0 ? mod.color.t : "white",
+                    color: i===0 ? "white" : mod.color.t,
+                    border:"1.5px solid "+mod.color.b, borderRadius:10,
+                    padding: i===0 ? "12px 16px" : "9px 12px",
+                    fontSize: i===0 ? 13 : 12, fontWeight: i===0 ? 700 : 400,
+                    cursor:"pointer", textAlign:"left", lineHeight:1.4,
+                    boxShadow: i===0 ? "0 4px 12px "+mod.color.t+"30" : "none",
+                    fontFamily:"inherit",
+                    display:"flex", alignItems:"center", gap:8,
+                  }}>
+                    <span>{i===0 ? "🚀" : "→"}</span>
+                    {i===0 ? "Comenzar módulo "+mod.id+" (sesión guiada)" : q}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:7,width:"100%",maxWidth:340}}>
-            {starters.map((q,i)=>(
-              <button key={i} onClick={()=>call(q,[])} style={{
-                background:i===0?mod.color.t:"white",
-                color:i===0?"white":mod.color.t,
-                border:`1.5px solid ${mod.color.b}`,borderRadius:10,
-                padding:i===0?"12px 16px":"9px 12px",fontSize:i===0?13:12,
-                fontWeight:i===0?700:400,cursor:"pointer",textAlign:"left",lineHeight:1.4,
-                boxShadow:i===0?`0 4px 12px ${mod.color.t}30`:"none",
-              }}>{i===0?"🚀 Comenzar módulo "+mod.id:q}</button>
-            ))}
+        )}
+
+        {/* Message history */}
+        {msgs.map(function(m, i) {
+          var isLast = i === msgs.length - 1;
+          var displayText = m.cleanText || m.content;
+          return (
+            <div key={i} className="fadeup" style={{display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
+              {m.role === "user" ? (
+                <div style={{background:mod.color.t,color:"white",borderRadius:"14px 14px 4px 14px",padding:"10px 14px",maxWidth:"82%",fontSize:13,lineHeight:1.6}}>
+                  {m.content}
+                </div>
+              ) : (
+                <div style={{maxWidth:"96%",width:"96%"}}>
+                  <div style={{background:"white",border:"1px solid #E5E7EB",borderRadius:"14px 14px 14px 4px",padding:"12px 14px"}}>
+                    <Md text={displayText}/>
+                  </div>
+                  {isLast && !loading && m.actions && m.actions.length > 0 && (
+                    <ActionBar actions={m.actions} color={mod.color.t} onAction={function(a) { call(a, msgs); }} disabled={loading}/>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Streaming bubble */}
+        {(loading || streaming) && (
+          <div className="fadeup" style={{display:"flex",alignItems:"flex-start"}}>
+            <div style={{background:"white",border:"1px solid #E5E7EB",borderRadius:"14px 14px 14px 4px",padding:"12px 14px",maxWidth:"92%",width:"92%"}}>
+              {streaming ? (
+                <Md text={parseActions(streaming).text}/>
+              ) : (
+                <div style={{display:"flex",gap:5,alignItems:"center",padding:"4px 0"}}>
+                  {[0,1,2].map(function(j) {
+                    return <div key={j} style={{width:7,height:7,borderRadius:"50%",background:mod.color.t,animation:"pulse 1.2s ease-in-out infinite",animationDelay:(j*.2)+"s"}}/>;
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sticky action bar at bottom when conversation active */}
+        {msgs.length > 0 && !loading && pendingActions && pendingActions.length > 0 && (
+          <div style={{position:"sticky",bottom:0,paddingTop:4}}>
+            <ActionBar actions={pendingActions} color={mod.color.t} onAction={function(a) { call(a, msgs); }} disabled={loading}/>
+          </div>
+        )}
+
+        <div ref={bottomRef}/>
+      </div>
+
+      {/* Input bar */}
+      {msgs.length > 0 && (
+        <div style={{padding:"10px 12px",borderTop:"1px solid #F3F4F6",background:"white",flexShrink:0}}>
+          <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+            <textarea ref={inputRef} value={input} rows={1}
+              onChange={function(e) { setInput(e.target.value); e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,100)+"px"; }}
+              onKeyDown={function(e) { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+              placeholder="O escribe tu propia pregunta… (Enter para enviar)"
+              disabled={loading}
+              style={{flex:1,borderRadius:10,border:"1px solid #E5E7EB",padding:"10px 12px",fontSize:13,resize:"none",fontFamily:"inherit",lineHeight:1.5,outline:"none",background:loading?"#F9FAFB":"white",maxHeight:100,overflowY:"auto"}}/>
+            <button onClick={send} disabled={loading || !input.trim()} style={{
+              width:38,height:38,borderRadius:10,border:"none",flexShrink:0,
+              background:(loading || !input.trim())?"#E5E7EB":mod.color.t,
+              color:(loading || !input.trim())?"#9CA3AF":"white",
+              cursor:(loading || !input.trim())?"not-allowed":"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,
+              transition:"background .15s",fontFamily:"inherit",
+            }}>↑</button>
           </div>
         </div>
       )}
-
-      {msgs.map((m,i)=>(
-        <div key={i} className="fadeup" style={{display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
-          {m.role==="user"
-            ?<div style={{background:mod.color.t,color:"white",borderRadius:"14px 14px 4px 14px",padding:"10px 14px",maxWidth:"82%",fontSize:13,lineHeight:1.6}}>{m.content}</div>
-            :<div style={{background:"white",border:"1px solid #E5E7EB",borderRadius:"14px 14px 14px 4px",padding:"12px 14px",maxWidth:"92%",width:"92%"}}><Md text={m.content}/></div>
-          }
-        </div>
-      ))}
-
-      {(loading||streaming)&&<div className="fadeup" style={{display:"flex",alignItems:"flex-start"}}>
-        <div style={{background:"white",border:"1px solid #E5E7EB",borderRadius:"14px 14px 14px 4px",padding:"12px 14px",maxWidth:"92%",width:"92%"}}>
-          {streaming?<Md text={streaming}/>:<div style={{display:"flex",gap:5,alignItems:"center",padding:"4px 0"}}>{[0,1,2].map(j=><div key={j} style={{width:7,height:7,borderRadius:"50%",background:mod.color.t,animation:"pulse 1.2s ease-in-out infinite",animationDelay:`${j*.2}s`}}/>)}</div>}
-        </div>
-      </div>}
-      <div ref={bottomRef}/>
     </div>
-
-    {/* input */}
-    {msgs.length>0&&<div style={{padding:"10px 12px",borderTop:"1px solid #F3F4F6",background:"white",flexShrink:0}}>
-      <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-        <textarea ref={inputRef} value={input} rows={1}
-          onChange={e=>{ setInput(e.target.value); e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,100)+"px"; }}
-          onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} }}
-          placeholder="Escribe tu pregunta… (Enter para enviar)"
-          disabled={loading}
-          style={{flex:1,borderRadius:10,border:"1px solid #E5E7EB",padding:"10px 12px",fontSize:13,resize:"none",fontFamily:"inherit",lineHeight:1.5,outline:"none",background:loading?"#F9FAFB":"white",maxHeight:100,overflowY:"auto"}}/>
-        <button onClick={send} disabled={loading||!input.trim()} style={{width:38,height:38,borderRadius:10,border:"none",flexShrink:0,background:(loading||!input.trim())?"#E5E7EB":mod.color.t,color:(loading||!input.trim())?"#9CA3AF":"white",cursor:(loading||!input.trim())?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,transition:"background .15s"}}>↑</button>
-      </div>
-    </div>}
-  </div>;
+  );
 }
 
-// ─── SUBMODULE ────────────────────────────────────────────────────────────────
-function SubCard({sub,topicChecked,projDone,onTopic,onProj}) {
-  const [open,setOpen]=useState(false);
-  const done=(topicChecked||[]).filter(Boolean).length+Object.values(projDone||{}).filter(Boolean).length;
-  const total=sub.topics.length+sub.projects.length;
-  const pct=total>0?Math.round(done/total*100):0;
-  return <div style={{border:`1.5px solid ${sub.color}30`,borderRadius:12,overflow:"hidden",marginBottom:8}}>
-    <div onClick={()=>setOpen(!open)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:sub.bg,cursor:"pointer",userSelect:"none"}}>
-      <span style={{fontSize:18}}>{sub.icon}</span>
-      <div style={{flex:1}}>
-        <div style={{fontSize:13,fontWeight:700,color:sub.color}}>{sub.name}</div>
-        <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{sub.dur} · {sub.topics.length} temas · {sub.projects.length} proyectos</div>
+// ─── SUBMODULE CARD ───────────────────────────────────────────────────────────
+function SubCard({sub, topicChecked, projDone, onTopic, onProj}) {
+  const [open, setOpen] = useState(false);
+  var done = (topicChecked||[]).filter(Boolean).length + Object.values(projDone||{}).filter(Boolean).length;
+  var total = sub.topics.length + sub.projects.length;
+  var pct = total > 0 ? Math.round(done/total*100) : 0;
+
+  return (
+    <div style={{border:"1.5px solid "+sub.color+"30",borderRadius:12,overflow:"hidden",marginBottom:8}}>
+      <div onClick={function() { setOpen(!open); }} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:sub.bg,cursor:"pointer",userSelect:"none"}}>
+        <span style={{fontSize:18}}>{sub.icon}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700,color:sub.color}}>{sub.name}</div>
+          <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{sub.dur} · {sub.topics.length} temas · {sub.projects.length} proyectos</div>
+        </div>
+        <Ring pct={pct} size={36} sw={3} color={sub.color}/>
+        <span style={{fontSize:10,color:"#9CA3AF",transition:".2s",transform:open?"rotate(180deg)":"none"}}>▼</span>
       </div>
-      <Ring pct={pct} size={36} sw={3} color={sub.color}/>
-      <span style={{fontSize:10,color:"#9CA3AF",transition:".2s",transform:open?"rotate(180deg)":"none"}}>▼</span>
+      {open && (
+        <div style={{padding:12,background:"white",borderTop:"1px solid "+sub.color+"15"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8}}>Temas</div>
+          {sub.topics.map(function(t,i) {
+            return (
+              <label key={i} onClick={function() { onTopic(i); }} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 8px",borderRadius:7,cursor:"pointer",background:(topicChecked||[])[i]?"#F0FDF4":"transparent",marginBottom:3}}>
+                <div style={{width:16,height:16,borderRadius:4,border:"2px solid "+((topicChecked||[])[i]?sub.color:"#D1D5DB"),background:(topicChecked||[])[i]?sub.color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+                  {(topicChecked||[])[i] && <span style={{color:"white",fontSize:9}}>✓</span>}
+                </div>
+                <span style={{fontSize:12,color:(topicChecked||[])[i]?"#166534":"#374151",textDecoration:(topicChecked||[])[i]?"line-through":"none",lineHeight:1.5}}>{t}</span>
+              </label>
+            );
+          })}
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",margin:"12px 0 8px"}}>Proyectos</div>
+          {sub.projects.map(function(p,pi) {
+            return (
+              <div key={pi} style={{border:"1px solid "+((projDone||{})[pi]?"#86EFAC":"#E5E7EB"),borderRadius:8,padding:"10px 12px",background:(projDone||{})[pi]?"#F0FDF4":"white",marginBottom:6,display:"flex",gap:10,alignItems:"flex-start"}}>
+                <div onClick={function() { onProj(pi); }} style={{width:20,height:20,borderRadius:5,border:"2px solid "+((projDone||{})[pi]?sub.color:"#D1D5DB"),background:(projDone||{})[pi]?sub.color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer",marginTop:1}}>
+                  {(projDone||{})[pi] && <span style={{color:"white",fontSize:10}}>✓</span>}
+                </div>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:(projDone||{})[pi]?"#166534":"#111827",marginBottom:2}}>
+                    {p.t} <Pill label={p.tag} color={sub.color} bg={sub.bg}/>
+                  </div>
+                  <div style={{fontSize:11,color:"#6B7280"}}>{p.d}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
-    {open&&<div style={{padding:12,background:"white",borderTop:`1px solid ${sub.color}15`}}>
-      <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8}}>Temas</div>
-      {sub.topics.map((t,i)=><label key={i} onClick={()=>onTopic(i)} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 8px",borderRadius:7,cursor:"pointer",background:(topicChecked||[])[i]?"#F0FDF4":"transparent",marginBottom:3}}>
-        <div style={{width:16,height:16,borderRadius:4,border:`2px solid ${(topicChecked||[])[i]?sub.color:"#D1D5DB"}`,background:(topicChecked||[])[i]?sub.color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
-          {(topicChecked||[])[i]&&<span style={{color:"white",fontSize:9}}>✓</span>}
-        </div>
-        <span style={{fontSize:12,color:(topicChecked||[])[i]?"#166534":"#374151",textDecoration:(topicChecked||[])[i]?"line-through":"none",lineHeight:1.5}}>{t}</span>
-      </label>)}
-      <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",margin:"12px 0 8px"}}>Proyectos</div>
-      {sub.projects.map((p,pi)=><div key={pi} style={{border:`1px solid ${(projDone||{})[pi]?"#86EFAC":"#E5E7EB"}`,borderRadius:8,padding:"10px 12px",background:(projDone||{})[pi]?"#F0FDF4":"white",marginBottom:6,display:"flex",gap:10,alignItems:"flex-start"}}>
-        <div onClick={()=>onProj(pi)} style={{width:20,height:20,borderRadius:5,border:`2px solid ${(projDone||{})[pi]?sub.color:"#D1D5DB"}`,background:(projDone||{})[pi]?sub.color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer",marginTop:1}}>
-          {(projDone||{})[pi]&&<span style={{color:"white",fontSize:10}}>✓</span>}
-        </div>
-        <div>
-          <div style={{fontSize:12,fontWeight:700,color:(projDone||{})[pi]?"#166534":"#111827",marginBottom:2}}>{p.t} <Pill label={p.tag} color={sub.color} bg={sub.bg}/></div>
-          <div style={{fontSize:11,color:"#6B7280"}}>{p.d}</div>
-        </div>
-      </div>)}
-    </div>}
-  </div>;
+  );
 }
 
 // ─── MODULE DETAIL ────────────────────────────────────────────────────────────
-function ModDetail({mod,progress,onProgress,provider,apiKey}) {
-  const [tab,setTab]=useState("contenido");
-  const top=progress.topics||[], prj=progress.projects||{};
-  const toggleTopic=i=>{ const n=[...top]; n[i]=!n[i]; onProgress({...progress,topics:n}); };
-  const toggleProj=pi=>{ onProgress({...progress,projects:{...prj,[pi]:!prj[pi]}}); };
-  const toggleSubT=(sid,i)=>{ const st=progress.subTopics||{}; const c=st[sid]||[]; const n=[...c]; n[i]=!n[i]; onProgress({...progress,subTopics:{...st,[sid]:n}}); };
-  const toggleSubP=(sid,pi)=>{ const sp=progress.subProjs||{}; const c=sp[sid]||{}; onProgress({...progress,subProjs:{...sp,[sid]:{...c,[pi]:!c[pi]}}}); };
+function ModDetail({mod, progress, onProgress, provider, apiKey}) {
+  const [tab, setTab] = useState("contenido");
+  var top = progress.topics || [];
+  var prj = progress.projects || {};
 
-  let total=0,done=0;
-  if(mod.submodules){ mod.submodules.forEach(s=>{ total+=s.topics.length+s.projects.length; const st=(progress.subTopics||{})[s.id]||[]; const sp=(progress.subProjs||{})[s.id]||{}; done+=st.filter(Boolean).length+Object.values(sp).filter(Boolean).length; }); }
-  else { total=mod.topics.length+mod.projects.length; done=top.filter(Boolean).length+Object.values(prj).filter(Boolean).length; }
-  const pct=total>0?Math.round(done/total*100):0;
+  function toggleTopic(i) { var n=[...top]; n[i]=!n[i]; onProgress({...progress,topics:n}); }
+  function toggleProj(pi) { onProgress({...progress,projects:{...prj,[pi]:!prj[pi]}}); }
+  function toggleSubT(sid,i) { var st=progress.subTopics||{}; var c=st[sid]||[]; var n=[...c]; n[i]=!n[i]; onProgress({...progress,subTopics:{...st,[sid]:n}}); }
+  function toggleSubP(sid,pi) { var sp=progress.subProjs||{}; var c=sp[sid]||{}; onProgress({...progress,subProjs:{...sp,[sid]:{...c,[pi]:!c[pi]}}}); }
 
-  const Tab=({id,label,icon})=><button onClick={()=>setTab(id)} style={{flex:1,padding:"10px 0",border:"none",background:"transparent",fontSize:13,fontWeight:tab===id?700:400,color:tab===id?mod.color.t:"#9CA3AF",borderBottom:tab===id?`2px solid ${mod.color.t}`:"2px solid transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
-    <span style={{fontSize:14}}>{icon}</span>{label}
-  </button>;
+  var total=0, done=0;
+  if (mod.submodules) {
+    mod.submodules.forEach(function(s) {
+      total += s.topics.length + s.projects.length;
+      var st = (progress.subTopics||{})[s.id]||[];
+      var sp = (progress.subProjs||{})[s.id]||{};
+      done += st.filter(Boolean).length + Object.values(sp).filter(Boolean).length;
+    });
+  } else {
+    total = mod.topics.length + mod.projects.length;
+    done = top.filter(Boolean).length + Object.values(prj).filter(Boolean).length;
+  }
+  var pct = total > 0 ? Math.round(done/total*100) : 0;
 
-  return <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
-    <div style={{padding:"14px 14px 0",flexShrink:0}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:12}}>
-        <div style={{width:46,height:46,borderRadius:12,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>{mod.emoji}</div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
-            <span style={{fontSize:10,color:"#9CA3AF",fontWeight:700}}>MÓDULO {mod.id}</span>
-            <Pill label={mod.level} color={mod.color.t} bg={mod.color.bg}/>
-          </div>
-          <h2 style={{fontSize:16,fontWeight:800,color:"#111827",margin:"0 0 2px",lineHeight:1.3}}>{mod.name}</h2>
-          <p style={{fontSize:11,color:"#6B7280",margin:0}}>{mod.weeks} · {mod.hours}</p>
-        </div>
-        <Ring pct={pct} size={44} sw={4} color={mod.color.t}/>
-      </div>
-    </div>
-    <div style={{display:"flex",borderBottom:"1px solid #F3F4F6",flexShrink:0,padding:"0 14px"}}>
-      <Tab id="contenido" label="Contenido" icon="📋"/>
-      <Tab id="ia" label="Tutor IA" icon="🤖"/>
-    </div>
-    <div style={{flex:1,overflow:tab==="ia"?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
-      {tab==="contenido"&&<div style={{padding:"14px",paddingBottom:60,overflowY:"auto"}}>
-        {mod.submodules?<>
-          <div style={{background:"#FFFBEB",border:"1px solid #FCD34D",borderRadius:10,padding:"10px 12px",marginBottom:14,display:"flex",gap:8}}>
-            <span style={{fontSize:14,flexShrink:0}}>💡</span>
-            <p style={{fontSize:11,color:"#92400E",margin:0,lineHeight:1.6}}>Este módulo tiene <strong>3 sub-módulos</strong>. Usa el <strong>Tutor IA</strong> para sesiones guiadas de Python, JavaScript y la API.</p>
-          </div>
-          {mod.submodules.map(sub=><SubCard key={sub.id} sub={sub}
-            topicChecked={(progress.subTopics||{})[sub.id]} projDone={(progress.subProjs||{})[sub.id]}
-            onTopic={i=>toggleSubT(sub.id,i)} onProj={pi=>toggleSubP(sub.id,pi)}/>)}
-        </>:<>
-          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",marginBottom:10}}>Temas</div>
-          {mod.topics.map((t,i)=><label key={i} onClick={()=>toggleTopic(i)} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:top[i]?"#F0FDF4":"#FAFAFA",border:`1px solid ${top[i]?"#86EFAC":"#F3F4F6"}`,transition:"all .15s"}}>
-            <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${top[i]?mod.color.t:"#D1D5DB"}`,background:top[i]?mod.color.t:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
-              {top[i]&&<span style={{color:"white",fontSize:9}}>✓</span>}
-            </div>
-            <span style={{fontSize:13,color:top[i]?"#166534":"#374151",textDecoration:top[i]?"line-through":"none",lineHeight:1.5}}>{t}</span>
-          </label>)}
-          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",margin:"16px 0 10px"}}>Proyectos hands-on</div>
-          {mod.projects.map((p,pi)=><div key={pi} style={{border:`1px solid ${prj[pi]?"#86EFAC":"#E5E7EB"}`,borderRadius:10,padding:"12px",background:prj[pi]?"#F0FDF4":"white",marginBottom:8,display:"flex",gap:10,alignItems:"flex-start"}}>
-            <div onClick={()=>toggleProj(pi)} style={{width:22,height:22,borderRadius:6,border:`2px solid ${prj[pi]?mod.color.t:"#D1D5DB"}`,background:prj[pi]?mod.color.t:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer",marginTop:1}}>
-              {prj[pi]&&<span style={{color:"white",fontSize:11}}>✓</span>}
-            </div>
-            <div style={{flex:1}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
-                <span style={{fontSize:13,fontWeight:700,color:prj[pi]?"#166534":"#111827"}}>{p.t}</span>
-                <Pill label={p.tag} color={mod.color.t} bg={mod.color.bg}/>
-              </div>
-              <p style={{fontSize:12,color:prj[pi]?"#15803D":"#6B7280",margin:0,lineHeight:1.5}}>{p.d}</p>
-            </div>
-          </div>)}
-        </>}
-        <div style={{marginTop:16,padding:"12px",background:mod.color.bg,border:`1px solid ${mod.color.b}`,borderRadius:10,display:"flex",gap:10,alignItems:"center"}}>
-          <span style={{fontSize:18}}>🤖</span>
-          <div style={{flex:1}}>
-            <div style={{fontSize:12,fontWeight:700,color:mod.color.t,marginBottom:2}}>¿Listo para practicar?</div>
-            <div style={{fontSize:11,color:"#6B7280"}}>Ve al Tutor IA para sesiones guiadas</div>
-          </div>
-          <button onClick={()=>setTab("ia")} style={{background:mod.color.t,color:"white",border:"none",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>Ir →</button>
-        </div>
-      </div>}
-      {tab==="ia"&&<div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"}}>
-        <Chat mod={mod} provider={provider} apiKey={apiKey}/>
-      </div>}
-    </div>
-  </div>;
-}
-
-// ─── SETTINGS ────────────────────────────────────────────────────────────────
-function Settings({provider, onChangeProvider, onBack, onClearAll}) {
-  const prov = PROVIDERS[provider];
-  const [confirm,setConfirm]=useState(false);
-  return <div style={{padding:"20px 16px",maxWidth:440,margin:"0 auto"}}>
-    <h2 style={{fontSize:18,fontWeight:800,color:"#111827",marginBottom:6}}>Ajustes</h2>
-
-    {/* Current provider */}
-    <div style={{background:prov.bg,border:`1.5px solid ${prov.border}`,borderRadius:12,padding:"12px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
-      <span style={{fontSize:20}}>{prov.emoji}</span>
-      <div style={{flex:1}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>Proveedor activo: {prov.name}</div>
-        <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{prov.model} · {prov.limits[0]}</div>
-      </div>
-    </div>
-
-    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      <button onClick={onChangeProvider} style={{padding:"14px",borderRadius:12,border:"1px solid #E5E7EB",background:"white",fontSize:13,fontWeight:700,color:"#111827",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-        🔄 <span>Cambiar proveedor o API key</span>
+  function Tab({id, label, icon}) {
+    return (
+      <button onClick={function() { setTab(id); }} style={{
+        flex:1, padding:"10px 0", border:"none", background:"transparent",
+        fontSize:13, fontWeight:tab===id?700:400, color:tab===id?mod.color.t:"#9CA3AF",
+        borderBottom:tab===id?"2px solid "+mod.color.t:"2px solid transparent",
+        cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5,
+        fontFamily:"inherit",
+      }}>
+        <span style={{fontSize:14}}>{icon}</span>{label}
       </button>
-      {!confirm
-        ?<button onClick={()=>setConfirm(true)} style={{padding:"14px",borderRadius:12,border:"1px solid #FECACA",background:"#FEF2F2",fontSize:13,fontWeight:700,color:"#B91C1C",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-          🗑️ <span>Borrar todo (progreso + clave)</span>
-        </button>
-        :<div style={{padding:"14px",borderRadius:12,border:"1px solid #FECACA",background:"#FEF2F2"}}>
-          <p style={{fontSize:13,color:"#B91C1C",marginBottom:10}}>¿Seguro? Se borrará todo el progreso, historial de chat y tu API key.</p>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setConfirm(false)} style={{flex:1,padding:"9px",borderRadius:8,border:"1px solid #E5E7EB",background:"white",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={onClearAll} style={{flex:1,padding:"9px",borderRadius:8,border:"none",background:"#B91C1C",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Sí, borrar todo</button>
+    );
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
+      <div style={{padding:"14px 14px 0",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:12}}>
+          <div style={{width:46,height:46,borderRadius:12,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>{mod.emoji}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
+              <span style={{fontSize:10,color:"#9CA3AF",fontWeight:700}}>MÓDULO {mod.id}</span>
+              <Pill label={mod.level} color={mod.color.t} bg={mod.color.bg}/>
+            </div>
+            <h2 style={{fontSize:16,fontWeight:800,color:"#111827",margin:"0 0 2px",lineHeight:1.3}}>{mod.name}</h2>
+            <p style={{fontSize:11,color:"#6B7280",margin:0}}>{mod.weeks} · {mod.hours}</p>
           </div>
+          <Ring pct={pct} size={44} sw={4} color={mod.color.t}/>
         </div>
-      }
+      </div>
+
+      <div style={{display:"flex",borderBottom:"1px solid #F3F4F6",flexShrink:0,padding:"0 14px"}}>
+        <Tab id="contenido" label="Contenido" icon="📋"/>
+        <Tab id="ia" label="Tutor IA" icon="🤖"/>
+      </div>
+
+      <div style={{flex:1,overflow:tab==="ia"?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
+        {tab==="contenido" && (
+          <div style={{padding:"14px",paddingBottom:60,overflowY:"auto"}}>
+            {mod.submodules ? (
+              <>
+                <div style={{background:"#FFFBEB",border:"1px solid #FCD34D",borderRadius:10,padding:"10px 12px",marginBottom:14,display:"flex",gap:8}}>
+                  <span style={{fontSize:14,flexShrink:0}}>💡</span>
+                  <p style={{fontSize:11,color:"#92400E",margin:0,lineHeight:1.6}}>Este módulo tiene <strong>3 sub-módulos</strong>. Usa el <strong>Tutor IA</strong> para sesiones guiadas de Python, JavaScript y la API.</p>
+                </div>
+                {mod.submodules.map(function(sub) {
+                  return <SubCard key={sub.id} sub={sub}
+                    topicChecked={(progress.subTopics||{})[sub.id]}
+                    projDone={(progress.subProjs||{})[sub.id]}
+                    onTopic={function(i) { toggleSubT(sub.id,i); }}
+                    onProj={function(pi) { toggleSubP(sub.id,pi); }}/>;
+                })}
+              </>
+            ) : (
+              <>
+                <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",marginBottom:10}}>Temas</div>
+                {mod.topics.map(function(t,i) {
+                  return (
+                    <label key={i} onClick={function() { toggleTopic(i); }} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:4,background:top[i]?"#F0FDF4":"#FAFAFA",border:"1px solid "+(top[i]?"#86EFAC":"#F3F4F6"),transition:"all .15s"}}>
+                      <div style={{width:18,height:18,borderRadius:5,border:"2px solid "+(top[i]?mod.color.t:"#D1D5DB"),background:top[i]?mod.color.t:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+                        {top[i] && <span style={{color:"white",fontSize:9}}>✓</span>}
+                      </div>
+                      <span style={{fontSize:13,color:top[i]?"#166534":"#374151",textDecoration:top[i]?"line-through":"none",lineHeight:1.5}}>{t}</span>
+                    </label>
+                  );
+                })}
+
+                <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",margin:"16px 0 10px"}}>Proyectos hands-on</div>
+                {mod.projects.map(function(p,pi) {
+                  return (
+                    <div key={pi} style={{border:"1px solid "+(prj[pi]?"#86EFAC":"#E5E7EB"),borderRadius:10,padding:"12px",background:prj[pi]?"#F0FDF4":"white",marginBottom:8,display:"flex",gap:10,alignItems:"flex-start"}}>
+                      <div onClick={function() { toggleProj(pi); }} style={{width:22,height:22,borderRadius:6,border:"2px solid "+(prj[pi]?mod.color.t:"#D1D5DB"),background:prj[pi]?mod.color.t:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer",marginTop:1}}>
+                        {prj[pi] && <span style={{color:"white",fontSize:11}}>✓</span>}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
+                          <span style={{fontSize:13,fontWeight:700,color:prj[pi]?"#166534":"#111827"}}>{p.t}</span>
+                          <Pill label={p.tag} color={mod.color.t} bg={mod.color.bg}/>
+                        </div>
+                        <p style={{fontSize:12,color:prj[pi]?"#15803D":"#6B7280",margin:0,lineHeight:1.5}}>{p.d}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            <div style={{marginTop:16,padding:"12px",background:mod.color.bg,border:"1px solid "+mod.color.b,borderRadius:10,display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:18}}>🤖</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:mod.color.t,marginBottom:2}}>¿Listo para practicar?</div>
+                <div style={{fontSize:11,color:"#6B7280"}}>Ve al Tutor IA para sesiones guiadas con botones de acción</div>
+              </div>
+              <button onClick={function() { setTab("ia"); }} style={{background:mod.color.t,color:"white",border:"none",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0,fontFamily:"inherit"}}>Ir →</button>
+            </div>
+          </div>
+        )}
+
+        {tab==="ia" && (
+          <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"}}>
+            <Chat mod={mod} provider={provider} apiKey={apiKey}/>
+          </div>
+        )}
+      </div>
     </div>
-  </div>;
+  );
 }
 
-// ─── HOME ────────────────────────────────────────────────────────────────────
-function Home({progMap,provider,onSelect,onSettings}) {
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+function Settings({provider, onChangeProvider, onClearAll}) {
   const prov = PROVIDERS[provider];
-  const getP=mod=>{ const p=progMap[mod.id]||{}; let total=0,done=0;
-    if(mod.submodules){mod.submodules.forEach(s=>{total+=s.topics.length+s.projects.length;const st=(p.subTopics||{})[s.id]||[];const sp=(p.subProjs||{})[s.id]||{};done+=st.filter(Boolean).length+Object.values(sp).filter(Boolean).length;});}
-    else{total=mod.topics.length+mod.projects.length;done=(p.topics||[]).filter(Boolean).length+Object.values(p.projects||{}).filter(Boolean).length;}
-    return total>0?Math.round(done/total*100):0;
-  };
-  const gp=Math.round(MODULES.reduce((a,m)=>a+getP(m),0)/MODULES.length);
+  const [confirmDel, setConfirmDel] = useState(false);
 
-  return <div style={{paddingBottom:40}}>
-    <div style={{padding:"22px 16px 16px",borderBottom:"1px solid #E5E7EB",background:"white"}}>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:700,color:"#9CA3AF",letterSpacing:".08em",textTransform:"uppercase",marginBottom:5}}>Bootcamp · 12 semanas · 2–4h/día</div>
-          <h1 style={{fontSize:22,fontWeight:900,color:"#111827",margin:"0 0 5px",lineHeight:1.2}}>De Básico<br/>a Experto en Claude</h1>
-          <p style={{fontSize:12,color:"#6B7280",margin:0}}>7 módulos · 20+ proyectos · Tutor IA gratis</p>
+  return (
+    <div style={{padding:"20px 16px",maxWidth:440,margin:"0 auto"}}>
+      <h2 style={{fontSize:18,fontWeight:800,color:"#111827",marginBottom:16}}>Ajustes</h2>
+      <div style={{background:prov.bg,border:"1.5px solid "+prov.border,borderRadius:12,padding:"12px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20}}>{prov.emoji}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:2}}>Proveedor activo</div>
+          <div style={{fontSize:13,fontWeight:700,color:prov.color}}>{prov.name} · {prov.model}</div>
         </div>
-        <Ring pct={gp} size={58} sw={5} color="#111827"/>
       </div>
-      {/* Provider badge */}
-      <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10,padding:"5px 10px",borderRadius:20,background:prov.bg,border:`1px solid ${prov.border}`}}>
-        <span style={{fontSize:12}}>{prov.emoji}</span>
-        <span style={{fontSize:11,fontWeight:700,color:prov.color}}>{prov.name}</span>
-        <span style={{fontSize:10,color:"#6B7280"}}>· {prov.limits[0]} · {prov.limits[1]}</span>
-      </div>
-      <div style={{height:5,background:"#F3F4F6",borderRadius:5,overflow:"hidden",marginTop:12}}>
-        <div style={{height:"100%",width:gp+"%",background:"#111827",borderRadius:5,transition:"width .6s"}}/>
-      </div>
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-        <span style={{fontSize:10,color:"#9CA3AF"}}>Progreso total</span>
-        <span style={{fontSize:10,color:"#9CA3AF"}}>{gp}% completado</span>
-      </div>
-    </div>
-
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",background:"#F9FAFB",borderBottom:"1px solid #E5E7EB"}}>
-      {[{v:"12",l:"semanas"},{v:"~400h",l:"práctica"},{v:"20+",l:"proyectos"}].map((s,i)=>(
-        <div key={i} style={{padding:"12px 8px",textAlign:"center",borderRight:i<2?"1px solid #E5E7EB":"none"}}>
-          <div style={{fontSize:17,fontWeight:800,color:"#111827"}}>{s.v}</div>
-          <div style={{fontSize:10,color:"#9CA3AF"}}>{s.l}</div>
-        </div>
-      ))}
-    </div>
-
-    <div style={{padding:"14px"}}>
-      <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Módulos del programa</div>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
-        {MODULES.map(mod=>{ const pct=getP(mod),active=pct>0;
-          return <button key={mod.id} onClick={()=>onSelect(mod.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"13px",borderRadius:14,border:`1.5px solid ${active?mod.color.b:"#E5E7EB"}`,background:active?mod.color.bg+"BB":"white",cursor:"pointer",textAlign:"left",transition:"all .15s",width:"100%"}}>
-            <div style={{width:42,height:42,borderRadius:11,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{mod.emoji}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
-                <span style={{fontSize:9,color:"#9CA3AF",fontWeight:700}}>{mod.id}</span>
-                <Pill label={mod.level} color={mod.color.t} bg={mod.color.bg}/>
-                {mod.submodules&&<Pill label="3 sub-mód." color="#6D28D9" bg="#F5F3FF"/>}
-              </div>
-              <div style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mod.name}</div>
-              <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{mod.weeks} · {mod.hours}</div>
+        <button onClick={onChangeProvider} style={{padding:"14px",borderRadius:12,border:"1px solid #E5E7EB",background:"white",fontSize:13,fontWeight:700,color:"#111827",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10,fontFamily:"inherit"}}>
+          🔄 <span>Cambiar proveedor o API key</span>
+        </button>
+        {!confirmDel ? (
+          <button onClick={function() { setConfirmDel(true); }} style={{padding:"14px",borderRadius:12,border:"1px solid #FECACA",background:"#FEF2F2",fontSize:13,fontWeight:700,color:"#B91C1C",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10,fontFamily:"inherit"}}>
+            🗑️ <span>Borrar todo (progreso + clave)</span>
+          </button>
+        ) : (
+          <div style={{padding:"14px",borderRadius:12,border:"1px solid #FECACA",background:"#FEF2F2"}}>
+            <p style={{fontSize:13,color:"#B91C1C",marginBottom:10}}>¿Seguro? Se borrará todo el progreso, historial de chat y tu API key.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={function() { setConfirmDel(false); }} style={{flex:1,padding:"9px",borderRadius:8,border:"1px solid #E5E7EB",background:"white",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+              <button onClick={onClearAll} style={{flex:1,padding:"9px",borderRadius:8,border:"none",background:"#B91C1C",color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Sí, borrar todo</button>
             </div>
-            <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-              <Ring pct={pct} size={38} sw={3} color={mod.color.t}/>
-              <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <div style={{width:6,height:6,borderRadius:"50%",background:pct===100?"#22C55E":pct>0?"#F59E0B":"#E5E7EB"}}/>
-                <span style={{fontSize:10,color:"#9CA3AF"}}>{pct===100?"Completo":pct>0?"En curso":"Pendiente"}</span>
-              </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── HOME ─────────────────────────────────────────────────────────────────────
+function Home({progMap, provider, onSelect, onSettings}) {
+  const prov = PROVIDERS[provider];
+
+  function getP(mod) {
+    var p = progMap[mod.id] || {};
+    var total=0, done=0;
+    if (mod.submodules) {
+      mod.submodules.forEach(function(s) {
+        total += s.topics.length + s.projects.length;
+        var st = (p.subTopics||{})[s.id]||[];
+        var sp = (p.subProjs||{})[s.id]||{};
+        done += st.filter(Boolean).length + Object.values(sp).filter(Boolean).length;
+      });
+    } else {
+      total = mod.topics.length + mod.projects.length;
+      done = (p.topics||[]).filter(Boolean).length + Object.values(p.projects||{}).filter(Boolean).length;
+    }
+    return total > 0 ? Math.round(done/total*100) : 0;
+  }
+
+  var gp = Math.round(MODULES.reduce(function(a,m) { return a + getP(m); }, 0) / MODULES.length);
+
+  return (
+    <div style={{paddingBottom:40}}>
+      <div style={{padding:"22px 16px 16px",borderBottom:"1px solid #E5E7EB",background:"white"}}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:"#9CA3AF",letterSpacing:".08em",textTransform:"uppercase",marginBottom:5}}>Bootcamp · 12 semanas · 2–4h/día</div>
+            <h1 style={{fontSize:22,fontWeight:900,color:"#111827",margin:"0 0 5px",lineHeight:1.2}}>De Básico<br/>a Experto en Claude</h1>
+            <p style={{fontSize:12,color:"#6B7280",margin:0}}>7 módulos · 20+ proyectos · Tutor IA guiado</p>
+          </div>
+          <Ring pct={gp} size={58} sw={5} color="#111827"/>
+        </div>
+        <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10,padding:"5px 10px",borderRadius:20,background:prov.bg,border:"1px solid "+prov.border}}>
+          <span style={{fontSize:12}}>{prov.emoji}</span>
+          <span style={{fontSize:11,fontWeight:700,color:prov.color}}>{prov.name}</span>
+          <span style={{fontSize:10,color:"#6B7280"}}>· Gratis</span>
+        </div>
+        <div style={{height:5,background:"#F3F4F6",borderRadius:5,overflow:"hidden",marginTop:12}}>
+          <div style={{height:"100%",width:gp+"%",background:"#111827",borderRadius:5,transition:"width .6s"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+          <span style={{fontSize:10,color:"#9CA3AF"}}>Progreso total</span>
+          <span style={{fontSize:10,color:"#9CA3AF"}}>{gp}% completado</span>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",background:"#F9FAFB",borderBottom:"1px solid #E5E7EB"}}>
+        {[{v:"12",l:"semanas"},{v:"~400h",l:"práctica"},{v:"20+",l:"proyectos"}].map(function(s,i) {
+          return (
+            <div key={i} style={{padding:"12px 8px",textAlign:"center",borderRight:i<2?"1px solid #E5E7EB":"none"}}>
+              <div style={{fontSize:17,fontWeight:800,color:"#111827"}}>{s.v}</div>
+              <div style={{fontSize:10,color:"#9CA3AF"}}>{s.l}</div>
             </div>
-          </button>;
+          );
         })}
       </div>
-      <button onClick={onSettings} style={{marginTop:14,width:"100%",padding:"11px",borderRadius:10,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:12,color:"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-        ⚙️ Ajustes (cambiar proveedor, borrar progreso)
-      </button>
+
+      <div style={{padding:"14px"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Módulos del programa</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {MODULES.map(function(mod) {
+            var pct = getP(mod);
+            var active = pct > 0;
+            return (
+              <button key={mod.id} onClick={function() { onSelect(mod.id); }} style={{
+                display:"flex",alignItems:"center",gap:12,padding:"13px",
+                borderRadius:14,border:"1.5px solid "+(active?mod.color.b:"#E5E7EB"),
+                background:active?mod.color.bg+"BB":"white",
+                cursor:"pointer",textAlign:"left",transition:"all .15s",width:"100%",fontFamily:"inherit",
+              }}>
+                <div style={{width:42,height:42,borderRadius:11,background:mod.color.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{mod.emoji}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
+                    <span style={{fontSize:9,color:"#9CA3AF",fontWeight:700}}>{mod.id}</span>
+                    <Pill label={mod.level} color={mod.color.t} bg={mod.color.bg}/>
+                    {mod.submodules && <Pill label="3 sub-mód." color="#6D28D9" bg="#F5F3FF"/>}
+                  </div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mod.name}</div>
+                  <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{mod.weeks} · {mod.hours}</div>
+                </div>
+                <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                  <Ring pct={pct} size={38} sw={3} color={mod.color.t}/>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:pct===100?"#22C55E":pct>0?"#F59E0B":"#E5E7EB"}}/>
+                    <span style={{fontSize:10,color:"#9CA3AF"}}>{pct===100?"Completo":pct>0?"En curso":"Pendiente"}</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={onSettings} style={{marginTop:14,width:"100%",padding:"11px",borderRadius:10,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:12,color:"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
+          ⚙️ Ajustes (cambiar proveedor, borrar progreso)
+        </button>
+      </div>
     </div>
-  </div>;
+  );
 }
 
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 function App() {
-  const [cfg, setCfg]     = useLS("cb_cfg_v1", null);   // {provider, apiKey}
-  const [progMap, setProgMap] = useLS("cb_prog_v3", {});
-  const [view, setView]   = useState("home");
+  const [cfg, setCfg] = useLS("cb_cfg_v4", null);
+  const [progMap, setProgMap] = useLS("cb_prog_v4", {});
+  const [view, setView] = useState("home");
   const [setupMode, setSetupMode] = useState(false);
 
-  const needSetup = !cfg || !cfg.apiKey;
+  var needSetup = !cfg || !cfg.apiKey;
+  var activeMod = view.startsWith("m:") ? MODULES.find(function(m) { return m.id === view.slice(2); }) : null;
 
-  if (needSetup || setupMode) {
-    return <Setup onSave={(provider, apiKey) => { setCfg({provider, apiKey}); setSetupMode(false); }}/>;
+  function clearAll() {
+    Object.keys(localStorage).filter(function(k) {
+      return k.startsWith("cb_") || k.startsWith("chat4_");
+    }).forEach(function(k) { localStorage.removeItem(k); });
+    setCfg(null); setProgMap({}); setSetupMode(true); setView("home");
   }
 
-  const activeMod = view.startsWith("m:") ? MODULES.find(m=>m.id===view.slice(2)) : null;
+  if (needSetup || setupMode) {
+    return <Setup onSave={function(provider, apiKey) { setCfg({provider:provider, apiKey:apiKey}); setSetupMode(false); }}/>;
+  }
 
-  const clearAll = () => {
-    Object.keys(localStorage).filter(k=>k.startsWith("cb_")||k.startsWith("chat3_")).forEach(k=>localStorage.removeItem(k));
-    setCfg(null); setProgMap({}); setSetupMode(true);
-  };
-
-  return <div style={{display:"flex",flexDirection:"column",height:"100vh",background:"#F0EFE9",maxWidth:520,margin:"0 auto",boxShadow:"0 0 40px rgba(0,0,0,.08)"}}>
-    {/* nav */}
-    <div style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,.97)",backdropFilter:"blur(10px)",borderBottom:"1px solid #F3F4F6",padding:"0 14px",height:50,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-      {view!=="home"&&<button onClick={()=>setView("home")} style={{background:"none",border:"none",cursor:"pointer",color:"#374151",fontSize:20,padding:"0 6px 0 0",display:"flex",alignItems:"center",flexShrink:0}}>←</button>}
-      <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0}}>
-        <div style={{width:26,height:26,borderRadius:7,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"white",flexShrink:0}}>C</div>
-        <span style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-          {activeMod?`${activeMod.emoji} Módulo ${activeMod.id}`:view==="settings"?"Ajustes":"Claude Bootcamp"}
-        </span>
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:"#F0EFE9",maxWidth:520,margin:"0 auto",boxShadow:"0 0 40px rgba(0,0,0,.08)",fontFamily:"inherit"}}>
+      {/* Nav */}
+      <div style={{position:"sticky",top:0,zIndex:100,background:"rgba(255,255,255,.97)",backdropFilter:"blur(10px)",borderBottom:"1px solid #F3F4F6",padding:"0 14px",height:50,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        {view !== "home" && (
+          <button onClick={function() { setView("home"); }} style={{background:"none",border:"none",cursor:"pointer",color:"#374151",fontSize:20,padding:"0 6px 0 0",display:"flex",alignItems:"center",flexShrink:0,fontFamily:"inherit"}}>←</button>
+        )}
+        <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:0}}>
+          <div style={{width:26,height:26,borderRadius:7,background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"white",flexShrink:0}}>C</div>
+          <span style={{fontSize:14,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {activeMod ? (activeMod.emoji + " Módulo " + activeMod.id) : view==="settings" ? "Ajustes" : "Claude Bootcamp"}
+          </span>
+        </div>
+        {view === "home" && (
+          <div style={{display:"flex",alignItems:"center",gap:4,background:PROVIDERS[cfg.provider].bg,border:"1px solid "+PROVIDERS[cfg.provider].border,borderRadius:20,padding:"3px 8px",flexShrink:0}}>
+            <span style={{fontSize:11}}>{PROVIDERS[cfg.provider].emoji}</span>
+            <span style={{fontSize:10,fontWeight:700,color:PROVIDERS[cfg.provider].color}}>{PROVIDERS[cfg.provider].name}</span>
+          </div>
+        )}
       </div>
-      {/* provider chip in nav */}
-      {view==="home"&&<div style={{display:"flex",alignItems:"center",gap:4,background:PROVIDERS[cfg.provider].bg,border:`1px solid ${PROVIDERS[cfg.provider].border}`,borderRadius:20,padding:"3px 8px",flexShrink:0}}>
-        <span style={{fontSize:11}}>{PROVIDERS[cfg.provider].emoji}</span>
-        <span style={{fontSize:10,fontWeight:700,color:PROVIDERS[cfg.provider].color}}>{PROVIDERS[cfg.provider].name}</span>
-      </div>}
-    </div>
 
-    {/* content */}
-    <div style={{flex:1,overflow:activeMod?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
-      {activeMod
-        ?<ModDetail mod={activeMod} progress={progMap[activeMod.id]||{}}
-            onProgress={p=>setProgMap(prev=>({...prev,[activeMod.id]:p}))}
+      {/* Content */}
+      <div style={{flex:1,overflow:activeMod?"hidden":"auto",display:"flex",flexDirection:"column",minHeight:0}}>
+        {activeMod ? (
+          <ModDetail mod={activeMod} progress={progMap[activeMod.id]||{}}
+            onProgress={function(p) { setProgMap(function(prev) { return Object.assign({},prev,{[activeMod.id]:p}); }); }}
             provider={cfg.provider} apiKey={cfg.apiKey}/>
-        :view==="settings"
-          ?<Settings provider={cfg.provider} onChangeProvider={()=>setSetupMode(true)} onBack={()=>setView("home")} onClearAll={clearAll}/>
-          :<div style={{overflowY:"auto",flex:1}}><Home progMap={progMap} provider={cfg.provider} onSelect={id=>setView("m:"+id)} onSettings={()=>setView("settings")}/></div>
-      }
+        ) : view === "settings" ? (
+          <Settings provider={cfg.provider} onChangeProvider={function() { setSetupMode(true); }} onClearAll={clearAll}/>
+        ) : (
+          <div style={{overflowY:"auto",flex:1}}>
+            <Home progMap={progMap} provider={cfg.provider} onSelect={function(id) { setView("m:"+id); }} onSettings={function() { setView("settings"); }}/>
+          </div>
+        )}
+      </div>
     </div>
-  </div>;
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
+
